@@ -1,0 +1,11 @@
+# Three-worker kind cluster for parallel suite execution.
+# All nodes run as containers on the same GitHub Actions host, but Kubernetes
+# schedules pods across workers — demonstrating real multi-node orchestration.
+# Three runner replicas (one per worker) execute all three demo suites in parallel.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+  - role: worker

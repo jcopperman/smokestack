@@ -254,8 +254,9 @@ jobs:
           kind version
 
       # ── 3. Create cluster ────────────────────────────────────────────────────
+      # Uses k8s/kind-config.yaml: 1 control-plane + 3 workers.
       - name: Create kind cluster
-        run: kind create cluster --name smokestack
+        run: kind create cluster --name smokestack --config k8s/kind-config.yaml
 
       # ── 4. Build images ──────────────────────────────────────────────────────
       # Runner build context is project root so examples/ can be COPY'd in.
@@ -286,6 +287,7 @@ jobs:
           kubectl apply -f k8s/runner.yaml
 
       # ── 7. Wait for all workloads to be ready ────────────────────────────────
+      # Waits for all 3 runner replicas to be ready before triggering tests.
       - name: Wait for workloads ready
         run: |
           kubectl rollout status statefulset/postgres         -n smokestack --timeout=120s
@@ -293,13 +295,22 @@ jobs:
           kubectl rollout status deployment/smokestack-api    -n smokestack --timeout=120s
           kubectl rollout status deployment/smokestack-runner -n smokestack --timeout=120s
 
-      # ── 8. Port-forward API to localhost ────────────────────────────────────
+      # ── 8. Show cluster topology ─────────────────────────────────────────────
+      - name: Show cluster topology
+        run: |
+          echo "=== Nodes ==="
+          kubectl get nodes -o wide
+          echo ""
+          echo "=== Pods across cluster ==="
+          kubectl get pods -n smokestack -o wide
+
+      # ── 9. Port-forward API to localhost ────────────────────────────────────
       - name: Port-forward API
         run: |
           kubectl port-forward svc/smokestack-api-svc 3000:80 -n smokestack &
           sleep 3
 
-      # ── 9. Wait for API health ───────────────────────────────────────────────
+      # ── 10. Wait for API health ──────────────────────────────────────────────
       - name: Wait for API health
         run: |
           for i in $(seq 1 20); do
@@ -313,64 +324,107 @@ jobs:
           done
           curl -sf http://localhost:3000/api/health | jq .
 
-      # ── 10. Trigger newman-demo run ──────────────────────────────────────────
-      - name: Trigger newman-demo run
+      # ── 11. Trigger all 3 suites simultaneously ──────────────────────────────
+      # Each runner replica picks up one job — all three suites execute in parallel.
+      - name: Trigger all suites
         id: trigger
         run: |
-          RESPONSE=$(curl -sf -X POST http://localhost:3000/api/runs \
-            -H "Content-Type: application/json" \
-            -d '{"suite":"newman-demo","environment":"ci"}')
-          echo "$RESPONSE" | jq .
-          RUN_ID=$(echo "$RESPONSE" | jq -r .id)
-          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-          echo "Triggered run: $RUN_ID"
+          trigger() {
+            curl -sf -X POST http://localhost:3000/api/runs \
+              -H "Content-Type: application/json" \
+              -d "{\"suite\":\"$1\",\"environment\":\"ci\"}" | jq -r .id
+          }
 
-      # ── 11. Poll until complete ──────────────────────────────────────────────
-      - name: Wait for run to complete
+          NEWMAN_ID=$(trigger newman-demo)
+          PW_ID=$(trigger playwright-demo)
+          K6_ID=$(trigger k6-demo)
+
+          echo "newman-demo:     $NEWMAN_ID"
+          echo "playwright-demo: $PW_ID"
+          echo "k6-demo:         $K6_ID"
+
+          echo "newman_id=$NEWMAN_ID"   >> "$GITHUB_OUTPUT"
+          echo "pw_id=$PW_ID"           >> "$GITHUB_OUTPUT"
+          echo "k6_id=$K6_ID"           >> "$GITHUB_OUTPUT"
+
+      # ── 12. Poll all 3 runs concurrently ─────────────────────────────────────
+      - name: Wait for all runs to complete
         id: poll
         run: |
-          RUN_ID="${{ steps.trigger.outputs.run_id }}"
-          for i in $(seq 1 40); do
-            RUN=$(curl -sf "http://localhost:3000/api/runs/$RUN_ID")
-            STATUS=$(echo "$RUN" | jq -r .status)
-            echo "  [$i] status=$STATUS"
-            if [ "$STATUS" = "passed" ] || [ "$STATUS" = "failed" ] || [ "$STATUS" = "error" ]; then
-              echo "$RUN" | jq '{status, total_tests, passed_tests, failed_tests, duration_ms}'
-              echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-              break
-            fi
-            sleep 5
+          poll_run() {
+            local ID=$1 NAME=$2
+            for i in $(seq 1 60); do
+              RUN=$(curl -sf "http://localhost:3000/api/runs/$ID")
+              STATUS=$(echo "$RUN" | jq -r .status)
+              echo "  [$NAME:$i] $STATUS"
+              case "$STATUS" in
+                passed|failed|error)
+                  echo "$RUN" > "/tmp/ss_${NAME}"
+                  return 0
+                  ;;
+              esac
+              sleep 5
+            done
+            echo '{"status":"timeout"}' > "/tmp/ss_${NAME}"
+          }
+
+          poll_run "${{ steps.trigger.outputs.newman_id }}" newman     &
+          poll_run "${{ steps.trigger.outputs.pw_id }}"     playwright &
+          poll_run "${{ steps.trigger.outputs.k6_id }}"     k6         &
+          wait
+
+          echo ""
+          echo "=== Results ==="
+          for name in newman playwright k6; do
+            jq -c '{suite, status, passed_tests, failed_tests, duration_ms}' "/tmp/ss_${name}"
           done
 
-      # ── 12. Print logs on failure ────────────────────────────────────────────
+          NEWMAN_STATUS=$(jq -r .status /tmp/ss_newman)
+          PW_STATUS=$(jq    -r .status /tmp/ss_playwright)
+          K6_STATUS=$(jq    -r .status /tmp/ss_k6)
+
+          echo "newman_status=$NEWMAN_STATUS" >> "$GITHUB_OUTPUT"
+          echo "pw_status=$PW_STATUS"         >> "$GITHUB_OUTPUT"
+          echo "k6_status=$K6_STATUS"         >> "$GITHUB_OUTPUT"
+
+      # ── 13. Print logs for any failed suites ─────────────────────────────────
       - name: Print run logs (on failure)
-        if: steps.poll.outputs.status != 'passed'
+        if: steps.poll.outputs.newman_status != 'passed' || steps.poll.outputs.pw_status != 'passed' || steps.poll.outputs.k6_status != 'passed'
         run: |
-          RUN_ID="${{ steps.trigger.outputs.run_id }}"
-          curl -sf "http://localhost:3000/api/runs/$RUN_ID/logs" | jq -r .log_output
+          print_logs() {
+            local ID=$1 NAME=$2 STATUS=$3
+            if [ "$STATUS" != "passed" ]; then
+              echo "=== $NAME logs (status: $STATUS) ==="
+              curl -sf "http://localhost:3000/api/runs/$ID/logs" | jq -r .log_output
+            fi
+          }
+          print_logs "${{ steps.trigger.outputs.newman_id }}" newman     "${{ steps.poll.outputs.newman_status }}"
+          print_logs "${{ steps.trigger.outputs.pw_id }}"     playwright "${{ steps.poll.outputs.pw_status }}"
+          print_logs "${{ steps.trigger.outputs.k6_id }}"     k6         "${{ steps.poll.outputs.k6_status }}"
 
-      # ── 13. Assert passed ────────────────────────────────────────────────────
-      - name: Assert run passed
+      # ── 14. Assert all suites passed ─────────────────────────────────────────
+      - name: Assert all suites passed
         run: |
-          STATUS="${{ steps.poll.outputs.status }}"
-          if [ "$STATUS" != "passed" ]; then
-            echo "::error ::Run status was '$STATUS' — expected 'passed'"
-            exit 1
-          fi
-          echo "All tests passed on Kubernetes!"
+          FAILED=0
+          [ "${{ steps.poll.outputs.newman_status }}"     != "passed" ] && echo "::error::newman-demo: ${{ steps.poll.outputs.newman_status }}"     && FAILED=1
+          [ "${{ steps.poll.outputs.pw_status }}"         != "passed" ] && echo "::error::playwright-demo: ${{ steps.poll.outputs.pw_status }}"     && FAILED=1
+          [ "${{ steps.poll.outputs.k6_status }}"         != "passed" ] && echo "::error::k6-demo: ${{ steps.poll.outputs.k6_status }}"             && FAILED=1
+          [ "$FAILED" = "0" ] && echo "All 3 suites passed on Kubernetes!" || exit 1
 
-      # ── 14. Cluster diagnostics on failure ───────────────────────────────────
+      # ── 15. Cluster diagnostics on failure ───────────────────────────────────
       - name: Cluster diagnostics (on failure)
         if: failure()
         run: |
+          echo "=== Nodes ==="
+          kubectl get nodes -o wide
           echo "=== Pods ==="
-          kubectl get pods -n smokestack
+          kubectl get pods -n smokestack -o wide
           echo "=== API logs ==="
           kubectl logs -l app=smokestack-api -n smokestack --tail=50 || true
           echo "=== Runner logs ==="
           kubectl logs -l app=smokestack-runner -n smokestack --tail=100 || true
 
-      # ── 15. Tear down ────────────────────────────────────────────────────────
+      # ── 16. Tear down ────────────────────────────────────────────────────────
       - name: Delete kind cluster
         if: always()
         run: kind delete cluster --name smokestack
