@@ -1,18 +1,17 @@
-// @ts-check
-const { test, expect, request } = require('@playwright/test');
+import { test, expect, APIRequestContext } from '@playwright/test';
 
 /**
  * API tests using Playwright's request API against jsonplaceholder.typicode.com.
- * These test HTTP behavior without a browser, demonstrating Playwright's API testing capability.
+ * These test HTTP behaviour without a browser, demonstrating Playwright's API testing capability.
  */
 
 test.describe('JSONPlaceholder API — smoke tests', () => {
-  let apiContext;
+  let apiContext: APIRequestContext;
 
   test.beforeAll(async ({ playwright }) => {
     apiContext = await playwright.request.newContext({
       baseURL: 'https://jsonplaceholder.typicode.com',
-      extraHTTPHeaders: { 'Accept': 'application/json' },
+      extraHTTPHeaders: { Accept: 'application/json' },
     });
   });
 
@@ -24,11 +23,10 @@ test.describe('JSONPlaceholder API — smoke tests', () => {
     const response = await apiContext.get('/posts');
     expect(response.status()).toBe(200);
 
-    const posts = await response.json();
+    const posts = await response.json() as { id: number; title: string; body: string; userId: number }[];
     expect(Array.isArray(posts)).toBe(true);
     expect(posts.length).toBeGreaterThan(0);
 
-    // Validate shape of first post
     const first = posts[0];
     expect(first).toHaveProperty('id');
     expect(first).toHaveProperty('title');
@@ -40,7 +38,7 @@ test.describe('JSONPlaceholder API — smoke tests', () => {
     const response = await apiContext.get('/posts/1');
     expect(response.status()).toBe(200);
 
-    const post = await response.json();
+    const post = await response.json() as { id: number; title: string };
     expect(post.id).toBe(1);
     expect(typeof post.title).toBe('string');
     expect(post.title.length).toBeGreaterThan(0);
@@ -56,7 +54,7 @@ test.describe('JSONPlaceholder API — smoke tests', () => {
     });
     expect(response.status()).toBe(201);
 
-    const created = await response.json();
+    const created = await response.json() as { id: number; title: string };
     expect(created).toHaveProperty('id');
     expect(created.title).toBe('SmokeStack test post');
   });
@@ -65,7 +63,7 @@ test.describe('JSONPlaceholder API — smoke tests', () => {
     const response = await apiContext.get('/users');
     expect(response.status()).toBe(200);
 
-    const users = await response.json();
+    const users = await response.json() as { id: number; name: string; email: string }[];
     expect(Array.isArray(users)).toBe(true);
     expect(users.length).toBeGreaterThan(0);
 
@@ -79,11 +77,11 @@ test.describe('JSONPlaceholder API — smoke tests', () => {
     const response = await apiContext.get('/posts?userId=1');
     expect(response.status()).toBe(200);
 
-    const posts = await response.json();
+    const posts = await response.json() as { userId: number }[];
     expect(Array.isArray(posts)).toBe(true);
-    posts.forEach(post => {
+    for (const post of posts) {
       expect(post.userId).toBe(1);
-    });
+    }
   });
 
   test('GET /posts/9999 returns 404 for non-existent resource', async () => {

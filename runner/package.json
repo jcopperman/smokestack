@@ -2,10 +2,11 @@
   "name": "smokestack-runner",
   "version": "1.0.0",
   "description": "SmokeStack test runner worker",
-  "main": "src/worker.js",
+  "main": "dist/worker.js",
   "scripts": {
-    "start": "node src/worker.js",
-    "dev": "nodemon src/worker.js"
+    "build": "tsc",
+    "start": "node dist/worker.js",
+    "dev": "ts-node src/worker.ts"
   },
   "dependencies": {
     "bullmq": "^5.4.0",
@@ -13,6 +14,9 @@
     "pg": "^8.11.3"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "@types/node": "^20.11.0",
+    "@types/pg": "^8.11.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
   }
 }

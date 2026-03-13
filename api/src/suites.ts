@@ -1,6 +1,6 @@
-// Registry of available test suites
-// The runner must have matching entries in runner/src/suites.js
-const SUITES = {
+import { SuiteDefinition } from './types';
+
+const SUITES: Record<string, SuiteDefinition> = {
   'playwright-demo': {
     id: 'playwright-demo',
     name: 'Playwright Demo',
@@ -24,4 +24,4 @@ const SUITES = {
   },
 };
 
-module.exports = SUITES;
+export default SUITES;

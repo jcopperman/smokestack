@@ -1,12 +1,11 @@
-const path = require('path');
+import { defineConfig } from '@playwright/test';
+import path from 'path';
 
-// Allow the runner to inject an artifact output directory
 const artifactDir = process.env.ARTIFACT_DIR
   ? path.join(process.env.ARTIFACT_DIR)
   : path.join(__dirname, 'test-results');
 
-/** @type {import('@playwright/test').PlaywrightTestConfig} */
-module.exports = {
+export default defineConfig({
   testDir: './tests',
   timeout: 30000,
   retries: 1,
@@ -15,9 +14,7 @@ module.exports = {
   use: {
     headless: true,
     viewport: { width: 1280, height: 720 },
-    // Capture screenshot only on failure
     screenshot: 'only-on-failure',
-    // Capture video only on failure
     video: 'retain-on-failure',
   },
 
@@ -28,4 +25,4 @@ module.exports = {
   ],
 
   outputDir: path.join(artifactDir, 'attachments'),
-};
+});

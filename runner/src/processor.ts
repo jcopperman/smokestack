@@ -1,32 +1,31 @@
-const fs   = require('fs');
-const path = require('path');
-const db   = require('./db');
-const SUITES = require('./suites');
-const { runPlaywright, runNewman, runK6 } = require('./executor');
+import fs from 'fs';
+import path from 'path';
+import { Job } from 'bullmq';
+import pool from './db';
+import SUITES from './suites';
+import { runPlaywright, runNewman, runK6 } from './executor';
+import { JobData, RunUpdateFields } from './types';
 
 const ARTIFACT_DIR = process.env.ARTIFACT_DIR || '/artifacts';
 
-async function updateRun(runId, fields) {
-  const keys   = Object.keys(fields);
+async function updateRun(runId: string, fields: RunUpdateFields): Promise<void> {
+  const keys   = Object.keys(fields) as (keyof RunUpdateFields)[];
   const values = Object.values(fields);
   const sets   = keys.map((k, i) => `${k} = $${i + 2}`).join(', ');
-  await db.query(
+  await pool.query(
     `UPDATE runs SET ${sets}, updated_at = NOW() WHERE id = $1`,
     [runId, ...values]
   );
 }
 
-async function processJob(job) {
+export async function processJob(job: Job<JobData>): Promise<void> {
   const { runId, suite, environment } = job.data;
 
   console.log(`[runner] Starting job: runId=${runId} suite=${suite} env=${environment}`);
 
   const suiteConfig = SUITES[suite];
   if (!suiteConfig) {
-    await updateRun(runId, {
-      status: 'error',
-      error_message: `Unknown suite: ${suite}`,
-    });
+    await updateRun(runId, { status: 'error', error_message: `Unknown suite: ${suite}` });
     throw new Error(`Unknown suite: ${suite}`);
   }
 
@@ -41,7 +40,7 @@ async function processJob(job) {
 
   let exitCode = 1;
   let results  = null;
-  let errorMessage = null;
+  let errorMessage: string | null = null;
 
   try {
     if (suiteConfig.type === 'playwright') {
@@ -55,8 +54,8 @@ async function processJob(job) {
     }
   } catch (err) {
     console.error(`[runner] Execution error for ${runId}:`, err);
-    errorMessage = err.message;
-    fs.appendFileSync(logPath, `\n[ERROR] ${err.message}\n`);
+    errorMessage = (err as Error).message;
+    fs.appendFileSync(logPath, `\n[ERROR] ${errorMessage}\n`);
   }
 
   const durationMs = Date.now() - startTime;
@@ -65,11 +64,11 @@ async function processJob(job) {
   let logOutput = '';
   try {
     const raw = fs.readFileSync(logPath, 'utf8');
-    logOutput = raw.length > 100000 ? raw.slice(-100000) : raw;
-  } catch (_) {}
+    logOutput = raw.length > 100_000 ? raw.slice(-100_000) : raw;
+  } catch (_) { /* file may not exist on early error */ }
 
   // 4. Determine final status
-  let status;
+  let status: string;
   if (errorMessage && !results) {
     status = 'error';
   } else if (exitCode !== 0 || (results && results.failed > 0)) {
@@ -82,15 +81,13 @@ async function processJob(job) {
   await updateRun(runId, {
     status,
     duration_ms:   durationMs,
-    total_tests:   results ? results.total  : null,
-    passed_tests:  results ? results.passed : null,
-    failed_tests:  results ? results.failed : null,
+    total_tests:   results?.total  ?? null,
+    passed_tests:  results?.passed ?? null,
+    failed_tests:  results?.failed ?? null,
     artifact_path: runId,
     log_output:    logOutput,
-    error_message: errorMessage,
+    error_message: errorMessage ?? undefined,
   });
 
   console.log(`[runner] Completed job: runId=${runId} status=${status} duration=${durationMs}ms`);
 }
-
-module.exports = { processJob };

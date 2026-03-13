@@ -8,7 +8,7 @@ FROM mcr.microsoft.com/playwright:v1.42.0-jammy
 # Tell Playwright where the pre-installed browsers live so it doesn't try to
 # download them again at runtime.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-# Allow test files to require('@playwright/test') from the global install path.
+# Allow test files to import('@playwright/test') from the global install path.
 # Without this, Node.js won't find globally-installed packages from /suites/* files.
 ENV NODE_PATH=/usr/lib/node_modules
 
@@ -23,12 +23,13 @@ RUN curl -L https://github.com/grafana/k6/releases/download/v0.54.0/k6-v0.54.0-l
 
 WORKDIR /app
 
-# Install runner dependencies
-COPY runner/package.json runner/package-lock.json* ./
-RUN npm install --omit=dev
+# Install all dependencies (devDeps needed for TypeScript compilation)
+COPY runner/package.json runner/package-lock.json* runner/tsconfig.json ./
+RUN npm install
 
-# Copy runner source
+# Copy source, compile TypeScript, then prune devDeps to keep image lean
 COPY runner/src/ src/
+RUN npm run build && npm prune --omit=dev
 
 # Bake example suites into the image so the runner works in Kubernetes without
 # needing a volume mount. In Docker Compose, ./examples is also bind-mounted
@@ -38,4 +39,4 @@ COPY examples/ /suites/
 # Artifacts directory (overridden by the named volume / PVC at runtime)
 RUN mkdir -p /artifacts
 
-CMD ["node", "src/worker.js"]
+CMD ["node", "dist/worker.js"]

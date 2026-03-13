@@ -1,10 +1,11 @@
+import { RunnerSuiteConfig } from './types';
+
 // Maps suite IDs to execution config.
 // cwd values must match volume mount paths (./examples → /suites in Docker)
-const SUITES = {
+const SUITES: Record<string, RunnerSuiteConfig> = {
   'playwright-demo': {
     type: 'playwright',
     cwd: '/suites/playwright-demo',
-    // Command is built dynamically in executor with ARTIFACT_DIR injected
   },
   'newman-demo': {
     type: 'newman',
@@ -16,4 +17,4 @@ const SUITES = {
   },
 };
 
-module.exports = SUITES;
+export default SUITES;

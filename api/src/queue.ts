@@ -1,12 +1,13 @@
-const { Queue } = require('bullmq');
-const IORedis = require('ioredis');
+import { Queue } from 'bullmq';
+import IORedis from 'ioredis';
+import { JobData } from './types';
 
 const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
 });
 
-const runQueue = new Queue('test-runs', {
+export const runQueue = new Queue<JobData>('test-runs', {
   connection,
   defaultJobOptions: {
     attempts: 2,
@@ -15,5 +16,3 @@ const runQueue = new Queue('test-runs', {
     removeOnFail: { count: 100 },
   },
 });
-
-module.exports = { runQueue };

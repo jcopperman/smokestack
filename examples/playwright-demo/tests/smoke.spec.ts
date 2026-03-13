@@ -1,5 +1,4 @@
-// @ts-check
-const { test, expect } = require('@playwright/test');
+import { test, expect } from '@playwright/test';
 
 /**
  * Smoke tests for playwright.dev — tests the official Playwright documentation site.
@@ -28,17 +27,18 @@ test.describe('Playwright.dev — smoke tests', () => {
 
   test('docs navigation sidebar is present', async ({ page }) => {
     await page.goto('https://playwright.dev/docs/intro');
-    // Sidebar nav should be visible
-    const sidebar = page.locator('nav[class*="sidebar"], aside[class*="sidebar"], .theme-doc-sidebar-container').first();
+    const sidebar = page
+      .locator('nav[class*="sidebar"], aside[class*="sidebar"], .theme-doc-sidebar-container')
+      .first();
     await expect(sidebar).toBeVisible();
   });
 
   test('search is accessible via keyboard shortcut', async ({ page }) => {
     await page.goto('https://playwright.dev');
-    // Press Ctrl+K to open search (standard docs site shortcut)
     await page.keyboard.press('Control+K');
-    // Search input or modal should appear
-    const searchInput = page.locator('[placeholder*="search" i], [aria-label*="search" i], input[type="search"]').first();
+    const searchInput = page
+      .locator('[placeholder*="search" i], [aria-label*="search" i], input[type="search"]')
+      .first();
     await expect(searchInput).toBeVisible({ timeout: 5000 });
   });
 });
