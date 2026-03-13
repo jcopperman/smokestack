@@ -258,14 +258,27 @@ jobs:
       - name: Create kind cluster
         run: kind create cluster --name smokestack --config k8s/kind-config.yaml
 
-      # ── 4. Build images ──────────────────────────────────────────────────────
+      # ── 4. Install KEDA ──────────────────────────────────────────────────────
+      # KEDA watches the BullMQ Redis queue and scales the runner Deployment
+      # from 0 → N replicas as jobs are enqueued, back to 0 when queue empties.
+      - name: Install KEDA
+        run: |
+          helm repo add kedacore https://kedacore.github.io/charts
+          helm repo update
+          helm install keda kedacore/keda \
+            --namespace keda \
+            --create-namespace \
+            --wait \
+            --timeout 120s
+
+      # ── 5. Build images ──────────────────────────────────────────────────────
       # Runner build context is project root so examples/ can be COPY'd in.
       - name: Build Docker images
         run: |
           docker build -t smokestack-api:latest ./api
           docker build -t smokestack-runner:latest -f runner/Dockerfile .
 
-      # ── 5. Load images into the cluster ──────────────────────────────────────
+      # ── 6. Load images into the cluster ──────────────────────────────────────
       # kind clusters have no access to the host's Docker daemon image store,
       # so images must be explicitly loaded.
       - name: Load images into kind
@@ -273,21 +286,24 @@ jobs:
           kind load docker-image smokestack-api:latest --name smokestack
           kind load docker-image smokestack-runner:latest --name smokestack
 
-      # ── 6. Apply manifests ───────────────────────────────────────────────────
+      # ── 7. Apply manifests ───────────────────────────────────────────────────
       # Order matters: namespace and storage first, then dependencies (pg, redis),
       # then the application tier. Skip ingress — not needed for CI.
+      # keda-scaler.yaml is applied last — it requires the runner Deployment to exist.
       - name: Apply manifests
         run: |
           kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/rbac.yaml
           kubectl apply -f k8s/storage.yaml
           kubectl apply -f k8s/configmap.yaml
           kubectl apply -f k8s/postgres.yaml
           kubectl apply -f k8s/redis.yaml
           kubectl apply -f k8s/api.yaml
           kubectl apply -f k8s/runner.yaml
+          kubectl apply -f k8s/keda-scaler.yaml
 
-      # ── 7. Wait for all workloads to be ready ────────────────────────────────
-      # Waits for all 3 runner replicas to be ready before triggering tests.
+      # ── 8. Wait for all workloads to be ready ────────────────────────────────
+      # Runner starts at 0 replicas — KEDA scales it up once jobs are queued.
       - name: Wait for workloads ready
         run: |
           kubectl rollout status statefulset/postgres         -n smokestack --timeout=120s
@@ -295,7 +311,7 @@ jobs:
           kubectl rollout status deployment/smokestack-api    -n smokestack --timeout=120s
           kubectl rollout status deployment/smokestack-runner -n smokestack --timeout=120s
 
-      # ── 8. Show cluster topology ─────────────────────────────────────────────
+      # ── 9. Show cluster topology ─────────────────────────────────────────────
       - name: Show cluster topology
         run: |
           echo "=== Nodes ==="
@@ -304,13 +320,13 @@ jobs:
           echo "=== Pods across cluster ==="
           kubectl get pods -n smokestack -o wide
 
-      # ── 9. Port-forward API to localhost ────────────────────────────────────
+      # ── 10. Port-forward API to localhost ───────────────────────────────────
       - name: Port-forward API
         run: |
           kubectl port-forward svc/smokestack-api-svc 3000:80 -n smokestack &
           sleep 3
 
-      # ── 10. Wait for API health ──────────────────────────────────────────────
+      # ── 11. Wait for API health ──────────────────────────────────────────────
       - name: Wait for API health
         run: |
           for i in $(seq 1 20); do
@@ -324,7 +340,7 @@ jobs:
           done
           curl -sf http://localhost:3000/api/health | jq .
 
-      # ── 11. Trigger all 3 suites simultaneously ──────────────────────────────
+      # ── 12. Trigger all 3 suites simultaneously ──────────────────────────────
       # Each runner replica picks up one job — all three suites execute in parallel.
       - name: Trigger all suites
         id: trigger
@@ -347,7 +363,26 @@ jobs:
           echo "pw_id=$PW_ID"           >> "$GITHUB_OUTPUT"
           echo "k6_id=$K6_ID"           >> "$GITHUB_OUTPUT"
 
-      # ── 12. Poll all 3 runs concurrently ─────────────────────────────────────
+      # ── 12. Watch KEDA scale up ───────────────────────────────────────────────
+      # KEDA detects the 3 queued jobs and scales the runner from 0 → 3 replicas.
+      - name: Watch KEDA scale up
+        run: |
+          echo "Waiting for KEDA to scale runner from 0..."
+          for i in $(seq 1 24); do
+            READY=$(kubectl get deployment smokestack-runner -n smokestack \
+              -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+            echo "  [${i}] ready replicas: ${READY:-0}"
+            [ "${READY:-0}" -ge "3" ] && echo "Scaled to 3 runners!" && break
+            sleep 5
+          done
+          echo ""
+          echo "=== ScaledObject status ==="
+          kubectl get scaledobject smokestack-runner-scaler -n smokestack
+          echo ""
+          echo "=== Runner pods ==="
+          kubectl get pods -l app=smokestack-runner -n smokestack -o wide
+
+      # ── 13. Poll all 3 runs concurrently ─────────────────────────────────────
       - name: Wait for all runs to complete
         id: poll
         run: |
@@ -387,7 +422,7 @@ jobs:
           echo "pw_status=$PW_STATUS"         >> "$GITHUB_OUTPUT"
           echo "k6_status=$K6_STATUS"         >> "$GITHUB_OUTPUT"
 
-      # ── 13. Print logs for any failed suites ─────────────────────────────────
+      # ── 14. Print logs for any failed suites ─────────────────────────────────
       - name: Print run logs (on failure)
         if: steps.poll.outputs.newman_status != 'passed' || steps.poll.outputs.pw_status != 'passed' || steps.poll.outputs.k6_status != 'passed'
         run: |
@@ -402,7 +437,7 @@ jobs:
           print_logs "${{ steps.trigger.outputs.pw_id }}"     playwright "${{ steps.poll.outputs.pw_status }}"
           print_logs "${{ steps.trigger.outputs.k6_id }}"     k6         "${{ steps.poll.outputs.k6_status }}"
 
-      # ── 14. Assert all suites passed ─────────────────────────────────────────
+      # ── 15. Assert all suites passed ─────────────────────────────────────────
       - name: Assert all suites passed
         run: |
           FAILED=0
@@ -411,7 +446,7 @@ jobs:
           [ "${{ steps.poll.outputs.k6_status }}"         != "passed" ] && echo "::error::k6-demo: ${{ steps.poll.outputs.k6_status }}"             && FAILED=1
           [ "$FAILED" = "0" ] && echo "All 3 suites passed on Kubernetes!" || exit 1
 
-      # ── 15. Cluster diagnostics on failure ───────────────────────────────────
+      # ── 16. Cluster diagnostics on failure ───────────────────────────────────
       - name: Cluster diagnostics (on failure)
         if: failure()
         run: |
@@ -424,7 +459,7 @@ jobs:
           echo "=== Runner logs ==="
           kubectl logs -l app=smokestack-runner -n smokestack --tail=100 || true
 
-      # ── 16. Tear down ────────────────────────────────────────────────────────
+      # ── 17. Tear down ────────────────────────────────────────────────────────
       - name: Delete kind cluster
         if: always()
         run: kind delete cluster --name smokestack

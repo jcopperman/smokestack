@@ -1,0 +1,31 @@
+# ServiceAccount, Role, and RoleBinding that allow the API pod to list runner
+# pods — used by GET /api/runner/status to show live pod count in the dashboard.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: smokestack-api
+  namespace: smokestack
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: smokestack-api-role
+  namespace: smokestack
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: smokestack-api-rolebinding
+  namespace: smokestack
+subjects:
+  - kind: ServiceAccount
+    name: smokestack-api
+    namespace: smokestack
+roleRef:
+  kind: Role
+  name: smokestack-api-role
+  apiGroup: rbac.authorization.k8s.io

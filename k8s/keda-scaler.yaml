@@ -1,0 +1,34 @@
+# KEDA ScaledObject — event-driven autoscaling for the runner.
+#
+# Watches the BullMQ wait queue in Redis and adjusts runner replicas accordingly:
+#   - idle (queue empty)  →  0 replicas  (scale to zero, no idle cost)
+#   - 1 job queued        →  1 replica
+#   - N jobs queued       →  N replicas  (up to maxReplicaCount)
+#
+# BullMQ stores waiting jobs in a Redis List at key  bull:test-runs:wait.
+# KEDA polls that list every 5 seconds and patches the Deployment's replicas field.
+#
+# Requires KEDA to be installed in the cluster:
+#   helm repo add kedacore https://kedacore.github.io/charts
+#   helm install keda kedacore/keda --namespace keda --create-namespace
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: smokestack-runner-scaler
+  namespace: smokestack
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: smokestack-runner
+  minReplicaCount: 0      # scale to zero when no jobs are queued
+  maxReplicaCount: 10     # hard cap; increase for high-throughput environments
+  pollingInterval: 5      # seconds between queue-depth checks
+  cooldownPeriod: 60      # seconds after queue empties before scaling to zero
+  triggers:
+    - type: redis
+      metadata:
+        # Full cluster-DNS address so KEDA (in the keda namespace) reaches Redis
+        address: redis-svc.smokestack.svc.cluster.local:6379
+        listName: bull:test-runs:wait
+        listLength: "1"   # target: 1 runner replica per waiting job

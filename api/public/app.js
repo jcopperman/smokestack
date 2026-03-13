@@ -8,6 +8,7 @@ let currentRunId = null;
 let detailPollTimer = null;
 let currentRuns = [];   // cached last fetch for tag filtering
 let activeTag = null;   // currently selected tag filter
+let runnerStatusCache = null; // last known runner status response
 
 // ---- Router ---- //
 function route() {
@@ -160,6 +161,10 @@ async function showList() {
       <div class="stat-card red"><div class="label">Failed</div><div class="value" id="stat-failed">—</div></div>
       <div class="stat-card blue"><div class="label">Queued / Running</div><div class="value" id="stat-active">—</div></div>
     </div>
+    <div class="runner-status-bar" id="runner-status-bar">
+      <span class="runner-dot idle" id="runner-dot"></span>
+      <span id="runner-status-text">Loading runner status…</span>
+    </div>
     <div class="table-wrap">
       <div class="table-header">
         <span class="table-title">Recent Runs</span>
@@ -181,10 +186,11 @@ async function showList() {
   document.getElementById('btn-refresh').addEventListener('click', () => fetchRuns());
 
   await fetchRuns();
+  fetchRunnerStatus();
 
   clearInterval(pollTimer);
   pollTimer = setInterval(() => {
-    if (currentView === 'list') fetchRuns(true);
+    if (currentView === 'list') { fetchRuns(true); fetchRunnerStatus(); }
   }, 5000);
 }
 
@@ -251,6 +257,48 @@ function renderStats(runs) {
   set('stat-passed', passed);
   set('stat-failed', failed);
   set('stat-active', active);
+}
+
+async function fetchRunnerStatus() {
+  const dot  = document.getElementById('runner-dot');
+  const text = document.getElementById('runner-status-text');
+  if (!dot || !text) return;
+
+  try {
+    const res = await fetch(`${API}/runner/status`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    runnerStatusCache = data;
+
+    const { queue, pods } = data;
+    const busy = queue.active > 0 || queue.waiting > 0;
+
+    dot.className = `runner-dot ${busy ? 'active' : 'idle'}`;
+
+    const parts = [];
+
+    if (pods !== null && pods !== undefined) {
+      const podLabel = pods.running === 1 ? '1 pod' : `${pods.running} pods`;
+      const pendingNote = pods.pending > 0 ? ` <span class="runner-status-muted">(${pods.pending} starting)</span>` : '';
+      parts.push(`<span class="runner-status-value">${podLabel} running</span>${pendingNote}`);
+    }
+
+    if (queue.active > 0) {
+      parts.push(`<span class="runner-status-value">${queue.active}</span> active`);
+    }
+    if (queue.waiting > 0) {
+      parts.push(`<span class="runner-status-value">${queue.waiting}</span> waiting`);
+    }
+    if (!busy) {
+      parts.push('<span class="runner-status-muted">idle</span>');
+    }
+
+    const sep = '<span class="runner-status-sep">·</span>';
+    text.innerHTML = `<span class="runner-status-label">Runner</span>${sep}${parts.join(sep)}`;
+  } catch (_) {
+    if (dot)  dot.className = 'runner-dot idle';
+    if (text) text.innerHTML = '<span class="runner-status-label">Runner</span><span class="runner-status-sep">·</span><span class="runner-status-muted">status unavailable</span>';
+  }
 }
 
 function renderRunsTable(runs) {

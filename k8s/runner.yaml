@@ -4,7 +4,10 @@ metadata:
   name: smokestack-runner
   namespace: smokestack
 spec:
-  replicas: 3
+  # Replica count is managed by the KEDA ScaledObject in keda-scaler.yaml.
+  # Starts at 0 (idle); KEDA scales up when jobs enter the queue, back to 0 when empty.
+  # Without KEDA, set this to the desired static replica count.
+  replicas: 0
   selector:
     matchLabels:
       app: smokestack-runner
@@ -13,6 +16,9 @@ spec:
       labels:
         app: smokestack-runner
     spec:
+      # Allow enough time for an in-progress test to finish before force-kill.
+      # Must exceed the longest expected suite duration (k6-demo ~40s + buffer).
+      terminationGracePeriodSeconds: 120
       containers:
         - name: runner
           image: smokestack-runner:latest

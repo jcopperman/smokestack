@@ -13,6 +13,7 @@ spec:
       labels:
         app: smokestack-api
     spec:
+      serviceAccountName: smokestack-api   # grants pod-list permission via rbac.yaml
       containers:
         - name: api
           image: smokestack-api:latest

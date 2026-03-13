@@ -29,9 +29,15 @@ Automated tests often live scattered across local machines, CI jobs, and tool-sp
 - Execute runs asynchronously via a Redis + BullMQ job queue
 - Store run history and pass/fail counts in PostgreSQL
 - Serve HTML reports, JSON results, and raw logs per run
-- Tag runs with an environment name (`staging`, `production`, etc.)
+- Tag suites and filter runs by tag
+- Inject per-run environment variables from the dashboard or API
+- Historical pass rate charts per suite
+- Slack / webhook notifications on run completion
+- Step-level failure details extracted from Playwright, Newman, and k6 artifacts
+- **Live runner status bar** — shows active pod count and queue depth in the dashboard
 - Integrate with CI pipelines as a release gate
 - Run locally with Docker Compose or deploy to Kubernetes
+- **KEDA autoscaling** — runner scales from 0 → N pods as jobs are queued, back to 0 when idle
 
 ---
 
@@ -72,7 +78,7 @@ docker compose down -v
 
 ### From the dashboard
 
-Click **▶ New Run** in the top-right corner, select a suite and environment, and submit.
+Click **▶ New Run** in the top-right corner, select a suite and environment, and submit. Optionally inject environment variables using the **+ Add Env Var** button.
 
 ### From the CLI
 
@@ -142,6 +148,8 @@ Each run produces:
 | JSON results | `/artifacts/:runId/results.json` |
 | Raw log output | `/artifacts/:runId/run.log` |
 
+The run detail view also surfaces **step-level failure details** — showing exactly which test, step, and assertion failed with the error message and source location extracted from the artifact JSON.
+
 ---
 
 ## Example suites
@@ -176,6 +184,7 @@ Load test with a staged virtual user ramp-up (5 VUs over 35s). Runs 3 request ty
   description: 'What it tests and where',
   type: 'playwright',        // 'playwright' | 'newman' | 'k6'
   estimatedDurationSecs: 30,
+  tags: ['smoke', 'api'],    // optional — used for filtering in the dashboard
 }
 
 // runner/src/suites.ts  — controls how the runner executes it
@@ -213,8 +222,10 @@ The included GitHub Actions workflows exercise the full platform on every push:
 
 | Workflow | What it does |
 |---|---|
-| [ci.yml](.github/workflows/ci.yml) | Builds images, starts the full stack, runs all three example suites, asserts each passes. Also runs a parallel job on a real Kubernetes (kind) cluster. |
+| [ci.yml](.github/workflows/ci.yml) | Builds images, starts the full stack, runs all three example suites (in parallel), asserts each passes. Also runs a parallel job on a real 3-node Kubernetes (kind) cluster with KEDA autoscaling. |
 | [release-gate.yml](.github/workflows/release-gate.yml) | Template for other projects — deploy your app, trigger a SmokeStack suite, block the release if tests fail. Requires `SMOKESTACK_URL` secret. |
+
+The Kubernetes CI job demonstrates KEDA in action: all three suites are triggered simultaneously, KEDA detects the queue depth and scales the runner from 0 → 3 pods, all suites run in parallel, and the cluster scales back to zero once the queue empties.
 
 ---
 
@@ -227,7 +238,23 @@ The included GitHub Actions workflows exercise the full platform on every push:
 | `GET` | `/api/runs/:id` | Get a single run with full results |
 | `GET` | `/api/runs/:id/logs` | Get raw log output for a run |
 | `GET` | `/api/suites` | List registered suites |
+| `GET` | `/api/suites/:id/history` | Pass rate history for a suite |
+| `GET` | `/api/runner/status` | Live queue depth and runner pod count |
 | `GET` | `/api/health` | Health check |
+
+### `GET /api/runner/status`
+
+Returns BullMQ queue depth and — when running inside Kubernetes — the current runner pod count. Used by the dashboard's live runner status bar.
+
+```json
+{
+  "queue": { "waiting": 2, "active": 1, "completed": 47, "failed": 0 },
+  "pods":  { "running": 1, "pending": 2, "total": 3 },
+  "inCluster": true
+}
+```
+
+`pods` is `null` when not running in Kubernetes (e.g. Docker Compose).
 
 ---
 
@@ -242,6 +269,7 @@ flowchart TD
 
     subgraph API Service ["API Service (Express)"]
         REST[REST API\n/api/runs, /api/suites]
+        RUNNER_STATUS[Runner Status\n/api/runner/status]
         STATIC[Static Server\ndashboard + artifacts]
     end
 
@@ -249,7 +277,7 @@ flowchart TD
         REDIS[(Redis\nBullMQ)]
     end
 
-    subgraph Runner ["Runner Worker (Docker container)"]
+    subgraph Runner ["Runner Worker (Docker / k8s Pod)"]
         WORKER[BullMQ Worker]
         PW[Playwright\nbrowser + API tests]
         NM[Newman\nPostman collections]
@@ -264,10 +292,12 @@ flowchart TD
     CI -->|POST /api/runs| REST
     UI -->|POST /api/runs| REST
     UI -->|GET /api/runs| REST
+    UI -->|GET /api/runner/status| RUNNER_STATUS
     UI -->|GET /artifacts/...| STATIC
 
     REST -->|enqueue job| REDIS
     REST -->|INSERT queued run| PG
+    RUNNER_STATUS -->|getJobCounts| REDIS
     STATIC -->|read files| VOL
 
     REDIS -->|dequeue job| WORKER
@@ -288,18 +318,21 @@ flowchart LR
         DC[docker compose up --build]
     end
 
-    subgraph K8s ["Kubernetes"]
+    subgraph K8s ["Kubernetes (3-node kind cluster)"]
         NS[namespace.yaml]
+        RBAC[rbac.yaml\nServiceAccount + Role]
         CM[configmap.yaml]
         ST[storage.yaml\nPersistentVolumeClaim]
         PGK[postgres.yaml\nStatefulSet]
         RDK[redis.yaml\nDeployment]
         APIK[api.yaml\nDeployment + Service]
-        RNK[runner.yaml\nDeployment]
+        RNK[runner.yaml\nDeployment replicas=0]
+        KEDA[keda-scaler.yaml\nScaledObject]
 
-        NS --> CM --> ST
+        NS --> RBAC --> CM --> ST
         ST --> PGK & RDK
         PGK & RDK --> APIK & RNK
+        RNK --> KEDA
     end
 
     DC -. "same images,\ndocker-compose.yml" .- K8s
@@ -309,15 +342,19 @@ flowchart LR
 
 ## Kubernetes
 
-For local Kubernetes using [kind](https://kind.sigs.k8s.io/):
+### Quick start with kind
 
 ```bash
-kind create cluster --name smokestack
+kind create cluster --name smokestack --config k8s/kind-config.yaml
 
 docker build -t smokestack-api:latest ./api
 docker build -t smokestack-runner:latest -f runner/Dockerfile .
 kind load docker-image smokestack-api:latest --name smokestack
 kind load docker-image smokestack-runner:latest --name smokestack
+
+# Install KEDA for autoscaling
+helm repo add kedacore https://kedacore.github.io/charts
+helm install keda kedacore/keda --namespace keda --create-namespace --wait
 
 kubectl apply -f k8s/
 kubectl get pods -n smokestack
@@ -325,6 +362,37 @@ kubectl get pods -n smokestack
 # Expose dashboard
 kubectl port-forward service/smokestack-api-svc 3000:80 -n smokestack
 ```
+
+### KEDA autoscaling
+
+The runner Deployment starts at **0 replicas**. KEDA watches the BullMQ wait queue in Redis and scales the runner up as jobs are enqueued — one pod per queued job, up to a configurable maximum — then scales back to zero once the queue empties. This eliminates idle runner pods and demonstrates event-driven Kubernetes scaling.
+
+```
+Queue: 3 jobs enqueued
+  → KEDA detects queue depth (polls every 5s)
+  → runner scaled: 0 → 3 pods
+  → each pod picks up one job, runs in parallel
+  → queue empties, 60s cooldown
+  → runner scaled: 3 → 0 pods
+```
+
+The `ScaledObject` is defined in [k8s/keda-scaler.yaml](k8s/keda-scaler.yaml). Tune `maxReplicaCount` and `cooldownPeriod` in that file for your environment.
+
+### Runner pod status in the dashboard
+
+The dashboard's **Runs** page includes a live runner status bar that polls `GET /api/runner/status` every 5 seconds. When deployed on Kubernetes it shows the current pod count alongside queue depth:
+
+```
+● Runner · 3 pods running · 3 active
+```
+
+When idle (KEDA has scaled to zero):
+
+```
+○ Runner · idle
+```
+
+In Docker Compose (no Kubernetes), it shows queue depth only.
 
 ---
 
@@ -343,6 +411,7 @@ kubectl port-forward service/smokestack-api-svc 3000:80 -n smokestack
 | Dashboard | Vanilla HTML/CSS/JS (zero build step) |
 | Infrastructure | Docker + Docker Compose |
 | Orchestration | Kubernetes (manifests in `k8s/`) |
+| Autoscaling | [KEDA](https://keda.sh) — event-driven scaling based on Redis queue depth |
 
 ---
 
@@ -354,7 +423,10 @@ smokestack/
 │   ├── src/
 │   │   ├── index.ts            # App entry, routes, static middleware
 │   │   ├── types.ts            # Shared TypeScript types (SuiteDefinition, RunRecord, …)
-│   │   ├── routes/runs.ts      # /api/runs endpoints
+│   │   ├── routes/
+│   │   │   ├── runs.ts         # /api/runs endpoints
+│   │   │   ├── suites.ts       # /api/suites endpoints
+│   │   │   └── runner.ts       # /api/runner/status — queue depth + k8s pod count
 │   │   ├── suites.ts           # Suite registry (API side — dashboard dropdown)
 │   │   ├── queue.ts            # BullMQ job producer
 │   │   └── db.ts               # PostgreSQL pool
@@ -377,16 +449,19 @@ smokestack/
 │   └── k6-demo/                # Load test: 5 VUs, 3 request types, 8 checks
 │
 ├── .github/workflows/
-│   ├── ci.yml                  # Full stack CI — runs all suites + k8s job
+│   ├── ci.yml                  # Full stack CI — runs all 3 suites in parallel + 3-node k8s job
 │   └── release-gate.yml        # Template: block release on test failure
 │
 ├── k8s/                        # Kubernetes manifests
 │   ├── namespace.yaml
+│   ├── rbac.yaml               # ServiceAccount + Role (pod list) + RoleBinding
 │   ├── configmap.yaml
 │   ├── postgres.yaml           # StatefulSet + Service
 │   ├── redis.yaml              # Deployment + Service
 │   ├── api.yaml                # Deployment + ClusterIP Service
-│   ├── runner.yaml             # Deployment
+│   ├── runner.yaml             # Deployment (replicas=0, managed by KEDA)
+│   ├── keda-scaler.yaml        # ScaledObject — scales runner on BullMQ queue depth
+│   ├── kind-config.yaml        # kind cluster config: 1 control-plane + 3 workers
 │   ├── storage.yaml            # PersistentVolumeClaim
 │   └── ingress.yaml            # Optional ingress
 │
@@ -399,10 +474,13 @@ smokestack/
 ## Roadmap
 
 - [x] Environment variable injection per run
-- [x] Tag-based test selection
+- [x] Tag-based suite filtering
 - [x] Historical pass rate charts per suite
 - [x] Slack / webhook notifications on run completion
+- [x] Step-level failure details in the run detail view
+- [x] KEDA autoscaling — scale runner pods from 0 based on queue depth
+- [x] Live runner status in the dashboard (pod count + queue depth)
+- [x] Multi-node Kubernetes CI with parallel suite execution
 - [ ] Prometheus metrics endpoint
 - [ ] S3 / MinIO artifact storage backend
 - [ ] Flaky test detection — flag tests that pass/fail inconsistently across runs
-- [x] GitHub Actions CI integration

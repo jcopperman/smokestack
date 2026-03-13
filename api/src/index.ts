@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import runsRouter from './routes/runs';
 import suitesRouter from './routes/suites';
+import runnerRouter from './routes/runner';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -22,6 +23,9 @@ app.use('/api/suites', suitesRouter);
 
 // Runs API
 app.use('/api/runs', runsRouter);
+
+// Runner status (queue depth + k8s pod count)
+app.use('/api/runner', runnerRouter);
 
 // Serve artifact files — must be before the SPA catch-all
 app.use('/artifacts', (req: Request, res: Response, _next: NextFunction) => {
