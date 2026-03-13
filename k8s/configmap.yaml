@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smokestack-config
+  namespace: smokestack
+data:
+  DATABASE_URL: "postgresql://smokestack:smokestack@postgres-svc:5432/smokestack"
+  REDIS_URL: "redis://redis-svc:6379"
+  ARTIFACT_DIR: "/artifacts"
+  PORT: "3000"
+  CONCURRENCY: "2"

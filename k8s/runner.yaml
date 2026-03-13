@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smokestack-runner
+  namespace: smokestack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smokestack-runner
+  template:
+    metadata:
+      labels:
+        app: smokestack-runner
+    spec:
+      containers:
+        - name: runner
+          image: smokestack-runner:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: smokestack-config
+          volumeMounts:
+            - name: artifacts
+              mountPath: /artifacts
+            - name: suites
+              mountPath: /suites
+              readOnly: true
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1"
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: artifacts-pvc
+        - name: suites
+          configMap:
+            name: smokestack-suites

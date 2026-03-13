@@ -1,0 +1,11 @@
+{
+  "id": "smokestack-env",
+  "name": "SmokeStack Default",
+  "values": [
+    {
+      "key": "baseUrl",
+      "value": "https://jsonplaceholder.typicode.com",
+      "enabled": true
+    }
+  ]
+}

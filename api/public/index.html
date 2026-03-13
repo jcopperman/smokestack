@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmokeStack — QA Execution Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+<header class="app-header">
+  <div class="logo">Smoke<span>Stack</span></div>
+  <span class="spacer"></span>
+  <button class="btn btn-primary" id="btn-new-run">
+    &#9654; New Run
+  </button>
+</header>
+
+<main class="main" id="app">
+  <div class="loading-state"><div class="spinner"></div> Loading…</div>
+</main>
+
+<!-- New Run Modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal">
+    <h2>Trigger Test Run</h2>
+    <div class="form-group">
+      <label for="suite-select">Test Suite</label>
+      <select id="suite-select">
+        <option value="">Loading suites…</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="env-input">Environment</label>
+      <input type="text" id="env-input" value="staging" placeholder="e.g. staging, production" />
+    </div>
+    <div id="suite-desc" style="font-size:12px;color:var(--muted);margin-top:-8px;margin-bottom:8px;min-height:18px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-cancel">Cancel</button>
+      <button class="btn btn-primary" id="btn-trigger">
+        &#9654; Run Suite
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

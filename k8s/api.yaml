@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smokestack-api
+  namespace: smokestack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smokestack-api
+  template:
+    metadata:
+      labels:
+        app: smokestack-api
+    spec:
+      containers:
+        - name: api
+          image: smokestack-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: smokestack-config
+          volumeMounts:
+            - name: artifacts
+              mountPath: /artifacts
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: artifacts-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smokestack-api-svc
+  namespace: smokestack
+spec:
+  selector:
+    app: smokestack-api
+  ports:
+    - port: 80
+      targetPort: 3000
+  type: ClusterIP

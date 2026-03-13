@@ -1,0 +1,258 @@
+{
+  "info": {
+    "_postman_id": "smokestack-newman-demo",
+    "name": "SmokeStack — Newman Demo",
+    "description": "API smoke tests against JSONPlaceholder — a free, stable REST API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://jsonplaceholder.typicode.com",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Posts",
+      "item": [
+        {
+          "name": "GET all posts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is an array', function() {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.be.an('array');",
+                  "  pm.expect(body.length).to.be.greaterThan(0);",
+                  "});",
+                  "",
+                  "pm.test('Posts have required fields', function() {",
+                  "  const posts = pm.response.json();",
+                  "  posts.slice(0, 3).forEach(post => {",
+                  "    pm.expect(post).to.have.property('id');",
+                  "    pm.expect(post).to.have.property('title');",
+                  "    pm.expect(post).to.have.property('userId');",
+                  "  });",
+                  "});",
+                  "",
+                  "pm.test('Response time is acceptable', function() {",
+                  "  pm.expect(pm.response.responseTime).to.be.below(5000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/posts"
+          }
+        },
+        {
+          "name": "GET single post",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Returns post with id 1', function() {",
+                  "  const post = pm.response.json();",
+                  "  pm.expect(post.id).to.equal(1);",
+                  "  pm.expect(post.title).to.be.a('string').and.not.empty;",
+                  "  pm.expect(post.body).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/posts/1"
+          }
+        },
+        {
+          "name": "POST create post",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function() {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Created post has an ID', function() {",
+                  "  const created = pm.response.json();",
+                  "  pm.expect(created).to.have.property('id');",
+                  "  pm.expect(created.title).to.equal('SmokeStack Test Post');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"SmokeStack Test Post\",\n  \"body\": \"Automated test run by SmokeStack\",\n  \"userId\": 1\n}"
+            },
+            "url": "{{baseUrl}}/posts"
+          }
+        },
+        {
+          "name": "GET posts with query filter",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('All posts belong to userId 1', function() {",
+                  "  const posts = pm.response.json();",
+                  "  pm.expect(posts.length).to.be.greaterThan(0);",
+                  "  posts.forEach(post => {",
+                  "    pm.expect(post.userId).to.equal(1);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/posts?userId=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["posts"],
+              "query": [{ "key": "userId", "value": "1" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "GET all users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Returns 10 users', function() {",
+                  "  const users = pm.response.json();",
+                  "  pm.expect(users.length).to.equal(10);",
+                  "});",
+                  "",
+                  "pm.test('Users have name and email', function() {",
+                  "  const users = pm.response.json();",
+                  "  users.forEach(user => {",
+                  "    pm.expect(user).to.have.property('name');",
+                  "    pm.expect(user).to.have.property('email');",
+                  "    pm.expect(user.email).to.include('@');",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/users"
+          }
+        },
+        {
+          "name": "GET single user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('User has complete profile', function() {",
+                  "  const user = pm.response.json();",
+                  "  pm.expect(user.id).to.equal(1);",
+                  "  pm.expect(user).to.have.property('name');",
+                  "  pm.expect(user).to.have.property('email');",
+                  "  pm.expect(user).to.have.property('address');",
+                  "  pm.expect(user).to.have.property('company');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/users/1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Todos",
+      "item": [
+        {
+          "name": "GET incomplete todos",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function() {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Incomplete todos are returned', function() {",
+                  "  const todos = pm.response.json();",
+                  "  pm.expect(todos.length).to.be.greaterThan(0);",
+                  "  todos.forEach(todo => {",
+                  "    pm.expect(todo.completed).to.equal(false);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/todos?completed=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["todos"],
+              "query": [{ "key": "completed", "value": "false" }]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
