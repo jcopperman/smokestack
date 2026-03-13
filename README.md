@@ -1,5 +1,10 @@
 # SmokeStack
 
+[![CI](https://github.com/jcopperman/smokestack/actions/workflows/ci.yml/badge.svg)](https://github.com/jcopperman/smokestack/actions/workflows/ci.yml)
+[![Playwright](https://img.shields.io/badge/tested%20with-Playwright-45ba4b?logo=playwright)](https://playwright.dev)
+[![k6](https://img.shields.io/badge/load%20tested%20with-k6-7D64FF?logo=k6)](https://k6.io)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A self-hosted QA execution platform. Trigger browser, API, and performance test suites on demand from a dashboard or CI pipeline — results, logs, and HTML reports in one place.
 
 ```bash
