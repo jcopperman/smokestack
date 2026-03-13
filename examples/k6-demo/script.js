@@ -51,3 +51,18 @@ export default function () {
 
   sleep(1);
 }
+
+// handleSummary replaces the removed --summary-export flag (dropped in k6 v0.46).
+// SmokeStack passes ARTIFACT_DIR via -e so we can write summary.json to the right place.
+// The returned data object has the same metrics.checks.values structure that parseK6Results expects.
+export function handleSummary(data) {
+  const dir     = __ENV.ARTIFACT_DIR || '/tmp';
+  const checks  = data.metrics.checks ? data.metrics.checks.values : { passes: 0, fails: 0 };
+  const p95     = data.metrics.http_req_duration ? data.metrics.http_req_duration.values['p(95)'].toFixed(1) : '?';
+  const reqs    = data.metrics.http_reqs ? data.metrics.http_reqs.values.count : '?';
+
+  return {
+    [`${dir}/summary.json`]: JSON.stringify(data),
+    stdout: `\nChecks: ${checks.passes} passed, ${checks.fails} failed | p(95) latency: ${p95}ms | total requests: ${reqs}\n`,
+  };
+}

@@ -156,8 +156,10 @@ function parseNewmanResults(jsonPath) {
 async function runK6(suiteConfig, artifactDir, logPath) {
   const summaryJson = path.join(artifactDir, 'summary.json');
 
+  // Pass ARTIFACT_DIR via -e so handleSummary in the script can write summary.json.
+  // --summary-export was removed in k6 v0.46; handleSummary is the replacement.
   const { exitCode } = await runCommand(
-    'k6', ['run', '--summary-export', summaryJson, 'script.js'],
+    'k6', ['run', '-e', `ARTIFACT_DIR=${artifactDir}`, 'script.js'],
     { cwd: suiteConfig.cwd, logPath }
   );
 
