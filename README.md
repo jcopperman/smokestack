@@ -76,7 +76,7 @@ flowchart LR
         DC[docker compose up --build]
     end
 
-    subgraph K8s ["Kubernetes (kind / any cluster)"]
+    subgraph K8s ["Kubernetes"]
         NS[namespace.yaml]
         CM[configmap.yaml]
         ST[storage.yaml\nPersistentVolumeClaim]
