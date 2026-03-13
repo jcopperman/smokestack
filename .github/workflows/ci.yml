@@ -164,14 +164,59 @@ jobs:
             exit 1
           fi
 
-      # ── 15. Show all runs in DB ────────────────────────────────────────────
+      # ── 15. Trigger k6-demo run ────────────────────────────────────────────
+      - name: Trigger k6-demo run
+        id: k6_trigger
+        run: |
+          RESPONSE=$(curl -sf -X POST http://localhost:3000/api/runs \
+            -H "Content-Type: application/json" \
+            -d '{"suite":"k6-demo","environment":"ci"}')
+          echo "$RESPONSE" | jq .
+          echo "run_id=$(echo "$RESPONSE" | jq -r .id)" >> "$GITHUB_OUTPUT"
+
+      # ── 16. Poll k6 run ────────────────────────────────────────────────────
+      - name: Wait for k6 run to complete
+        id: k6_poll
+        run: |
+          RUN_ID="${{ steps.k6_trigger.outputs.run_id }}"
+          echo "Polling k6 run $RUN_ID..."
+
+          for i in $(seq 1 30); do
+            RUN=$(curl -sf "http://localhost:3000/api/runs/$RUN_ID")
+            STATUS=$(echo "$RUN" | jq -r .status)
+            echo "  [$i] status=$STATUS"
+
+            if [ "$STATUS" = "passed" ] || [ "$STATUS" = "failed" ] || [ "$STATUS" = "error" ]; then
+              echo "$RUN" | jq '{status, total_tests, passed_tests, failed_tests, duration_ms}'
+              echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+              break
+            fi
+            sleep 5
+          done
+
+      # ── 17. Print k6 logs on failure ───────────────────────────────────────
+      - name: Print k6 logs (on failure)
+        if: steps.k6_poll.outputs.status != 'passed'
+        run: |
+          RUN_ID="${{ steps.k6_trigger.outputs.run_id }}"
+          curl -sf "http://localhost:3000/api/runs/$RUN_ID/logs" | jq -r .log_output
+
+      - name: Assert k6 run passed
+        run: |
+          STATUS="${{ steps.k6_poll.outputs.status }}"
+          if [ "$STATUS" != "passed" ]; then
+            echo "::error ::k6 run status was '$STATUS' — expected 'passed'"
+            exit 1
+          fi
+
+      # ── 18. Show all runs in DB ────────────────────────────────────────────
       - name: Show all runs
         if: always()
         run: |
           echo "=== All runs ==="
           curl -sf http://localhost:3000/api/runs | jq '.runs[] | {id: .id[0:8], suite, status, passed_tests, failed_tests, duration_ms}'
 
-      # ── 16. Print docker logs on failure ──────────────────────────────────
+      # ── 19. Print docker logs on failure ──────────────────────────────────
       - name: Docker logs (on failure)
         if: failure()
         run: |
@@ -180,7 +225,7 @@ jobs:
           echo "=== Runner logs ==="
           docker compose logs runner --tail=100
 
-      # ── 17. Tear down ──────────────────────────────────────────────────────
+      # ── 20. Tear down ──────────────────────────────────────────────────────
       - name: Tear down
         if: always()
         run: docker compose down -v
