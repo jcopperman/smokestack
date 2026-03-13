@@ -68,6 +68,31 @@ flowchart TD
 
 The API never blocks on test execution. It creates a `queued` run record and returns immediately. The runner picks up the job asynchronously, executes the tests, then writes results and artifacts back.
 
+### Deployment targets
+
+```mermaid
+flowchart LR
+    subgraph Local ["Local (Docker Compose)"]
+        DC[docker compose up --build]
+    end
+
+    subgraph K8s ["Kubernetes (kind / any cluster)"]
+        NS[namespace.yaml]
+        CM[configmap.yaml]
+        ST[storage.yaml\nPersistentVolumeClaim]
+        PGK[postgres.yaml\nStatefulSet]
+        RDK[redis.yaml\nDeployment]
+        APIK[api.yaml\nDeployment + Service]
+        RNK[runner.yaml\nDeployment]
+
+        NS --> CM --> ST
+        ST --> PGK & RDK
+        PGK & RDK --> APIK & RNK
+    end
+
+    DC -. "same images,\ndocker-compose.yml" .- K8s
+```
+
 ---
 
 ## Stack
