@@ -1,404 +1,277 @@
-# SmokeStack – Lightweight QA Execution Platform
+# SmokeStack
 
-SmokeStack is a lightweight, containerized QA execution platform designed to run automated test suites on demand and provide centralized reporting. It demonstrates how modern testing workloads can be executed using containerized runners and orchestrated with Kubernetes.
+A lightweight, containerised QA execution platform. Trigger automated test suites on demand, track results, and view reports — all from a single dashboard.
 
-The goal of this project is to provide a simple but realistic QA infrastructure stack that can:
+```
+docker compose up --build
+```
 
-* Run automated test suites on demand
-* Execute tests inside isolated containers
-* Store test results and artifacts
-* Provide a dashboard for viewing runs and results
-* Scale test runners using container orchestration
-* Run locally via Docker Compose or on Kubernetes
-
-This project is intentionally minimal and focuses on **execution and infrastructure**, not test case management.
+Open **http://localhost:3000**
 
 ---
 
-# Core Features
+## What it does
 
-SmokeStack provides a small but practical set of capabilities.
-
-Test execution
-
-* Trigger test runs via API or UI
-* Execute tests inside isolated containers
-* Support Playwright, Newman, or other CLI-based frameworks
-
-Result tracking
-
-* Store test run metadata
-* Track pass/fail status and durations
-* Link to artifacts and reports
-
-Artifacts
-
-* Store test reports, screenshots, and logs
-* Support Playwright HTML reports
-* Support JUnit XML and JSON output
-
-Dashboard
-
-* View recent runs
-* See pass/fail summaries
-* Access logs and artifacts
-
-Infrastructure
-
-* Dockerized services
-* Queue-based execution
-* Kubernetes job runners
-* Observability support
+- Trigger Playwright or Newman test suites via the dashboard or REST API
+- Executes tests inside an isolated container with no setup required
+- Streams live logs and stores pass/fail counts per run
+- Links to HTML reports, JSON results, and raw logs as artifacts
+- Auto-refreshes run status every few seconds
 
 ---
 
-# Architecture
+## Architecture
 
-SmokeStack is built as a small microservice-style platform.
-
+```
 User / CI Pipeline
-↓
-QA Control API
-↓
-Redis Queue
-↓
-Test Runner Worker
-↓
-Artifacts + Postgres
-↓
-Dashboard UI
+       │
+       ▼  POST /api/runs
+  API Service  ──────────────────────────────────┐
+  (Express)                                      │
+       │ enqueue job                             │ serve dashboard
+       ▼                                         │ serve artifacts
+  Redis Queue                                    │
+  (BullMQ)                                       │
+       │ dequeue                                 │
+       ▼                                         │
+  Runner Worker ──► PostgreSQL  (run metadata)   │
+  (Playwright /                                  │
+   Newman)      ──► Artifact Volume (reports)    │
+                                                 │
+  Dashboard UI ◄────────────────────────────────┘
+  (Vanilla JS)
+```
 
-The platform separates **control logic** from **execution**, allowing test runs to scale independently.
-
----
-
-# Components
-
-API Service
-
-Handles requests to trigger test runs and query results.
-
-Responsibilities
-
-* Receive execution requests
-* Enqueue jobs
-* Track run status
-* Expose REST API
-
-Technologies
-
-* Node.js + Express or NestJS
-* PostgreSQL client
-* Redis queue client
+The API never blocks on test execution. It creates a `queued` run record and returns immediately. The runner picks up the job asynchronously, executes the tests, then writes results and artifacts back.
 
 ---
 
-Runner Worker
+## Stack
 
-Executes test suites inside containers.
-
-Responsibilities
-
-* Pull test suite
-* Execute framework commands
-* Upload artifacts
-* Persist results
-
-Supported frameworks
-
-* Playwright
-* Cypress
-* Newman
-* PactumJS
-* k6 (future)
-
-Each execution runs inside an isolated container.
+| Layer | Technology |
+|-------|-----------|
+| API | Node.js + Express |
+| Queue | Redis + BullMQ |
+| Database | PostgreSQL 16 |
+| Runner base image | `mcr.microsoft.com/playwright:v1.42.0-jammy` |
+| Browser testing | Playwright 1.42 |
+| API testing | Newman + newman-reporter-htmlextra |
+| Dashboard | Vanilla HTML/CSS/JS (zero build step) |
+| Infrastructure | Docker + Docker Compose |
+| Orchestration | Kubernetes (manifests in `k8s/`) |
 
 ---
 
-Redis Queue
+## Running locally
 
-Used to manage execution jobs and prevent API blocking.
+**Requirements:** Docker Desktop
 
-Responsibilities
+```bash
+# First run (builds images — takes 5–10 min for the Playwright base image)
+docker compose up --build
 
-* Queue test execution requests
-* Manage worker concurrency
-* Retry failed jobs
-
-Suggested library
-
-* BullMQ (Node)
-
----
-
-PostgreSQL
-
-Stores metadata about test runs.
-
-Example stored data
-
-* run_id
-* suite_name
-* environment
-* start_time
-* end_time
-* duration
-* status
-* artifact_path
-
----
-
-Artifact Storage
-
-Stores execution output.
-
-Artifacts may include
-
-* HTML reports
-* screenshots
-* logs
-* video recordings
-* JUnit XML results
-
-Initial implementation uses mounted volumes.
-Future versions may support object storage (S3 or MinIO).
-
----
-
-Dashboard UI
-
-Provides a simple interface for viewing test activity.
-
-Capabilities
-
-* trigger test runs
-* view recent runs
-* inspect logs
-* download reports
-* view pass/fail history
-
-Suggested stack
-
-* React
-* Next.js
-* or simple server-rendered pages
-
----
-
-# Kubernetes Execution Model
-
-SmokeStack uses Kubernetes Jobs for executing test runs.
-
-Workflow
-
-1. User triggers test suite
-2. API creates Kubernetes Job
-3. Job launches runner container
-4. Runner executes test suite
-5. Results and artifacts are stored
-6. Job exits
-
-Benefits
-
-* clean execution environments
-* scalable runners
-* isolated failures
-* reproducible results
-
----
-
-# Technology Stack
-
-Backend
-Node.js
-Express or NestJS
-
-Runner
-Playwright
-Newman
-
-Database
-PostgreSQL
-
-Queue
-Redis
-BullMQ
-
-UI
-React or Next.js
-
-Infrastructure
-Docker
-Docker Compose
-Kubernetes
-Helm (optional)
-
-Observability
-Prometheus
-Grafana
-
-CI/CD
-GitHub Actions
-
----
-
-# Running Locally
-
-The platform can run entirely on a local machine.
-
-Requirements
-
-Docker
-Docker Compose
-Node.js (optional for development)
-
-Start the stack
-
+# Subsequent runs
 docker compose up
+```
 
-This launches
+Dashboard: **http://localhost:3000**
 
-* API service
-* UI
-* Postgres
-* Redis
-* test runner container
-
-The dashboard becomes available at
-
-http://localhost:3000
+To wipe all data and start fresh:
+```bash
+docker compose down -v
+```
 
 ---
 
-# Running on Kubernetes
+## Project structure
 
-For local Kubernetes development, a cluster can be created with kind.
+```
+smokestack/
+├── api/                        # Express API + dashboard static files
+│   ├── src/
+│   │   ├── index.js            # App entry, routes, static middleware
+│   │   ├── db.js               # PostgreSQL pool
+│   │   ├── queue.js            # BullMQ producer
+│   │   ├── suites.js           # Suite registry (API side)
+│   │   └── routes/runs.js      # /api/runs endpoints
+│   └── public/                 # Dashboard (index.html, app.js, style.css)
+│
+├── runner/                     # BullMQ worker
+│   └── src/
+│       ├── worker.js           # Worker entry point
+│       ├── processor.js        # Job handler (mkdir → run → parse → persist)
+│       ├── executor.js         # Spawns playwright / newman processes
+│       ├── suites.js           # Suite registry (runner side)
+│       └── db.js               # PostgreSQL pool
+│
+├── examples/                   # Example test suites (mounted into runner)
+│   ├── playwright-demo/        # 5 UI tests + 6 API tests
+│   └── newman-demo/            # 7 API tests (Postman collection)
+│
+├── postgres/
+│   └── init.sql                # Creates the `runs` table
+│
+├── k8s/                        # Kubernetes manifests
+│   ├── namespace.yaml
+│   ├── configmap.yaml
+│   ├── postgres.yaml
+│   ├── redis.yaml
+│   ├── api.yaml
+│   ├── runner.yaml
+│   ├── storage.yaml
+│   └── ingress.yaml
+│
+└── docker-compose.yml
+```
 
-Create cluster
+---
 
+## API
+
+### Trigger a run
+
+```
+POST /api/runs
+Content-Type: application/json
+
+{
+  "suite": "playwright-demo",
+  "environment": "staging"
+}
+```
+
+Response:
+```json
+{
+  "id": "2bcaa19b-967b-4dd6-acca-fae640ac0367",
+  "suite": "playwright-demo",
+  "environment": "staging",
+  "status": "queued",
+  "created_at": "2026-03-13T06:00:00.000Z"
+}
+```
+
+### List runs
+
+```
+GET /api/runs?limit=50&offset=0&status=passed
+```
+
+### Get a run
+
+```
+GET /api/runs/:id
+```
+
+Response includes: `status`, `total_tests`, `passed_tests`, `failed_tests`, `duration_ms`, `artifact_path`, `error_message`
+
+### Get logs
+
+```
+GET /api/runs/:id/logs
+```
+
+### Available suites
+
+```
+GET /api/suites
+```
+
+### Artifacts
+
+Artifacts are served directly by the API:
+
+```
+GET /artifacts/:runId/html-report/index.html   # Playwright HTML report
+GET /artifacts/:runId/report.html              # Newman HTML report
+GET /artifacts/:runId/results.json             # JSON results
+GET /artifacts/:runId/run.log                  # Raw stdout/stderr
+```
+
+---
+
+## Example suites
+
+### playwright-demo
+
+Playwright tests split across two files:
+
+- `tests/smoke.spec.js` — 5 UI tests on [playwright.dev](https://playwright.dev): homepage title, "Get started" CTA, navigation, sidebar, search
+- `tests/api.spec.js` — 6 API tests on [jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com): GET posts, GET single post, POST create, filter by userId, GET users, 404 handling
+
+### newman-demo
+
+Newman collection with 7 requests across 3 folders against [jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com):
+
+- **Posts** — GET all, GET one, POST create, GET with filter
+- **Users** — GET all, GET one
+- **Todos** — GET incomplete
+
+Each request has inline test assertions for status codes, response shape, and response time.
+
+---
+
+## Adding a new suite
+
+**1. Create the suite files** under `examples/your-suite/`
+
+**2. Register it in both `api/src/suites.js` and `runner/src/suites.js`:**
+
+```js
+// api/src/suites.js
+'your-suite': {
+  id: 'your-suite',
+  name: 'Your Suite',
+  description: 'What it tests',
+  type: 'playwright', // or 'newman'
+}
+
+// runner/src/suites.js
+'your-suite': {
+  type: 'playwright',
+  cwd: '/suites/your-suite',
+}
+```
+
+**3. For Playwright suites**, include a `playwright.config.js` that reads `process.env.ARTIFACT_DIR` for output paths (see `examples/playwright-demo/playwright.config.js`).
+
+**4. For Newman suites**, include a `collection.json` in the suite directory. An optional `environment.json` is loaded automatically if present.
+
+No rebuild needed for new suites — the `examples/` directory is mounted as a live volume.
+
+---
+
+## Kubernetes
+
+For local Kubernetes development using [kind](https://kind.sigs.k8s.io/):
+
+```bash
+# Create cluster
 kind create cluster --name smokestack
 
-Deploy services
+# Load locally-built images
+kind load docker-image smokestack-api:latest --name smokestack
+kind load docker-image smokestack-runner:latest --name smokestack
 
+# Deploy
 kubectl apply -f k8s/
 
-Check pods
+# Check pods
+kubectl get pods -n smokestack
 
-kubectl get pods
-
-Expose UI
-
-kubectl port-forward service/smokestack-ui 8080:80
-
-Open browser
-
-http://localhost:8080
+# Expose dashboard
+kubectl port-forward service/smokestack-api-svc 3000:80 -n smokestack
+```
 
 ---
 
-# Example API Usage
+## Roadmap
 
-Trigger a smoke suite
-
-POST /runs
-
-Request
-
-{
-"suite": "smoke",
-"environment": "staging"
-}
-
-Response
-
-{
-"run_id": "abc123",
-"status": "queued"
-}
-
-Check run status
-
-GET /runs/{run_id}
-
----
-
-# Example Project Structure
-
-smokestack/
-
-api/
-
-runner/
-
-dashboard/
-
-docker/
-
-k8s/
-
-artifacts/
-
-reports/
-
-docker-compose.yml
-
-README.md
-
----
-
-# Roadmap
-
-Phase 1 – Core execution
-
-* Trigger test runs
-* Execute runner container
-* Store results
-* Basic dashboard
-
-Phase 2 – QA functionality
-
-* Environment variables per run
-* Tag-based execution
-* Artifact uploads
-* Retry failed runs
-
-Phase 3 – Infrastructure
-
-* Kubernetes job execution
-* Helm deployment
-* Prometheus metrics
-* GitHub Actions CI
-
-Phase 4 – Advanced features
-
-* flaky test detection
-* historical analytics
-* Slack notifications
-* environment comparison
-
----
-
-# Use Cases
-
-SmokeStack can be used as:
-
-Internal QA platform
-Self-service test execution portal
-Environment verification tool
-Release validation system
-Test evidence repository
-
----
-
-# License
-
-MIT License
-
----
-
-# Motivation
-
-Modern teams rely heavily on automated testing but often lack a simple, centralized platform to trigger, observe, and manage those tests.
-
-SmokeStack demonstrates how containerized infrastructure and Kubernetes can be used to create a scalable, reproducible QA execution platform with minimal complexity.
+- [ ] Flaky test detection (flag tests that pass/fail inconsistently across runs)
+- [ ] Historical pass rate charts per suite
+- [ ] Slack / webhook notifications on failure
+- [ ] Environment variable injection per run
+- [ ] Tag-based test selection
+- [ ] Prometheus metrics endpoint
+- [ ] S3 / MinIO artifact storage backend
+- [ ] GitHub Actions CI integration
