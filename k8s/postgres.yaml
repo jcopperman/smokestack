@@ -18,6 +18,7 @@ data:
         artifact_path TEXT,
         error_message TEXT,
         log_output    TEXT,
+        env_vars      JSONB        NOT NULL DEFAULT '{}',
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
