@@ -5,7 +5,9 @@
 [![k6](https://img.shields.io/badge/load%20tested%20with-k6-7D64FF?logo=k6)](https://k6.io)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A self-hosted QA execution platform. Trigger browser, API, and performance test suites on demand from a dashboard or CI pipeline — results, logs, and HTML reports in one place.
+SmokeStack is a self-hosted test execution platform for automated QA suites. It lets teams trigger browser, API, and performance tests from a dashboard or CI pipeline and centralizes results, logs, and HTML reports in one place.
+
+Runs are queued and executed asynchronously — the API returns immediately, and a worker container picks up the job, executes the suite, and writes results back when complete.
 
 ```bash
 docker compose up --build
@@ -15,16 +17,21 @@ Open **http://localhost:3000**
 
 ---
 
-## What it does
+## Why SmokeStack
 
-| Capability | Detail |
-|---|---|
-| Test execution | Runs Playwright, Newman, and k6 suites in isolated containers |
-| Dashboard | Trigger runs, monitor status, view pass/fail counts in real time |
-| Reports | HTML reports, JSON results, and raw logs stored per run |
-| REST API | Trigger and query runs programmatically from any CI pipeline |
-| Release gate | Block a deployment if tests fail — works with GitHub Actions or any CI tool |
-| Environments | Tag each run with an environment name (`staging`, `production`, etc.) |
+Automated tests often live scattered across local machines, CI jobs, and tool-specific dashboards — making it hard to get a consistent view of suite health across environments. SmokeStack provides a lightweight execution layer that centralizes test triggering, run history, and artifact storage in one place. Any team member, CI pipeline, or deployment script can trigger a suite via a single API call and retrieve structured results without knowing how the tests are set up internally. It's designed to be self-hosted, easy to extend, and straightforward to integrate into an existing workflow.
+
+---
+
+## Highlights
+
+- Trigger Playwright, Newman, and k6 suites from a dashboard or REST API
+- Execute runs asynchronously via a Redis + BullMQ job queue
+- Store run history and pass/fail counts in PostgreSQL
+- Serve HTML reports, JSON results, and raw logs per run
+- Tag runs with an environment name (`staging`, `production`, etc.)
+- Integrate with CI pipelines as a release gate
+- Run locally with Docker Compose or deploy to Kubernetes
 
 ---
 
@@ -141,35 +148,15 @@ Three example suites are included and run out of the box.
 
 ### playwright-demo
 
-Browser and API tests using Playwright against public test sites.
-
-| File | Tests | What it covers |
-|---|---|---|
-| `tests/smoke.spec.ts` | 5 | UI: homepage title, CTA button, navigation, sidebar, search |
-| `tests/api.spec.ts` | 6 | API: GET/POST posts, filter by userId, GET users, 404 handling |
+Browser and API tests using Playwright against public test sites. Covers UI navigation, element visibility, and REST API assertions across 11 tests.
 
 ### newman-demo
 
-Postman collection run via Newman against [jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com).
-
-| Folder | Requests | Assertions |
-|---|---|---|
-| Posts | GET all, GET one, POST create, GET with filter | Status codes, response shape, response time |
-| Users | GET all, GET one | Status codes, array length |
-| Todos | GET incomplete | Status code, filter correctness |
+Postman collection run via Newman against [jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com). Tests posts, users, and todos endpoints — covering status codes, response shape, and response time.
 
 ### k6-demo
 
-Load test with staged virtual user ramp-up.
-
-| Setting | Value |
-|---|---|
-| Virtual users | 5 (ramp 10s → hold 20s → ramp down 5s) |
-| Requests per iteration | 3 (GET post, GET users, POST create) |
-| Checks | 8 assertions across all requests |
-| Thresholds | p95 latency < 2s · HTTP error rate < 5% · check pass rate > 95% |
-
-Pass/fail is determined by threshold outcomes. Check passes and fails map to `passed_tests` / `failed_tests`.
+Load test with a staged virtual user ramp-up (5 VUs over 35s). Runs 3 request types per iteration with 8 checks and thresholds for p95 latency, error rate, and check pass rate. Pass/fail is determined by threshold outcomes.
 
 ---
 
@@ -277,7 +264,7 @@ flowchart TD
     WORKER -->|UPDATE run status + counts| PG
 ```
 
-The API never blocks on test execution — it creates a `queued` record and returns immediately. The runner picks up the job, executes the tests, and writes results back asynchronously.
+The API never blocks on test execution — it creates a `queued` record and returns immediately. The runner picks up the job, executes the suite, and writes results back asynchronously.
 
 ### Deployment targets
 
@@ -397,11 +384,11 @@ smokestack/
 
 ## Roadmap
 
-- [ ] Flaky test detection — flag tests that pass/fail inconsistently across runs
-- [ ] Historical pass rate charts per suite
-- [ ] Slack / webhook notifications on failure
 - [ ] Environment variable injection per run
 - [ ] Tag-based test selection
+- [ ] Historical pass rate charts per suite
+- [ ] Slack / webhook notifications on failure
 - [ ] Prometheus metrics endpoint
 - [ ] S3 / MinIO artifact storage backend
+- [ ] Flaky test detection — flag tests that pass/fail inconsistently across runs
 - [x] GitHub Actions CI integration
