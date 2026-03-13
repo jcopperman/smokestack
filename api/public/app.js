@@ -17,6 +17,9 @@ function route() {
   } else if (hash === '#/architecture') {
     setActiveNav('architecture');
     showArchitecture();
+  } else if (hash === '#/use-cases') {
+    setActiveNav('use-cases');
+    showUseCases();
   } else {
     setActiveNav('runs');
     showList();
@@ -392,6 +395,259 @@ function escHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// ---- Use Cases View ---- //
+function showUseCases() {
+  currentView = 'use-cases';
+  currentRunId = null;
+  clearInterval(pollTimer);
+  clearDetailPoll();
+
+  document.getElementById('app').innerHTML = `
+    <div class="uc-page">
+      <h1>Use Cases</h1>
+      <p class="subtitle">How teams use SmokeStack to verify, validate, and evidence their software quality.</p>
+
+      <!-- Core workflow -->
+      <div class="workflow-strip">
+        <div class="wf-step">
+          <div class="wf-icon">🖥️</div>
+          <div class="wf-label">Trigger</div>
+          <div class="wf-sublabel">Dashboard or API</div>
+        </div>
+        <div class="wf-arrow">›</div>
+        <div class="wf-step">
+          <div class="wf-icon">📬</div>
+          <div class="wf-label">Queue</div>
+          <div class="wf-sublabel">Redis / BullMQ</div>
+        </div>
+        <div class="wf-arrow">›</div>
+        <div class="wf-step">
+          <div class="wf-icon">🏃</div>
+          <div class="wf-label">Execute</div>
+          <div class="wf-sublabel">Isolated container</div>
+        </div>
+        <div class="wf-arrow">›</div>
+        <div class="wf-step">
+          <div class="wf-icon">📊</div>
+          <div class="wf-label">Results</div>
+          <div class="wf-sublabel">Pass / fail counts</div>
+        </div>
+        <div class="wf-arrow">›</div>
+        <div class="wf-step">
+          <div class="wf-icon">📦</div>
+          <div class="wf-label">Artifacts</div>
+          <div class="wf-sublabel">Reports &amp; logs</div>
+        </div>
+      </div>
+
+      <div class="uc-grid">
+
+        <!-- 1. Internal QA Platform -->
+        <div class="uc-card">
+          <div class="uc-card-header">
+            <div class="uc-card-icon">🏢</div>
+            <div>
+              <h3>Internal QA Platform</h3>
+              <span class="uc-tag uc-tag-team">Team tool</span>
+            </div>
+          </div>
+          <p>Give your whole team a central place to trigger and observe test runs without needing to install anything locally. QA engineers, developers, and managers all see the same live dashboard.</p>
+          <div class="uc-steps">
+            <div class="uc-step"><span class="step-num">1</span><span class="step-text">Deploy SmokeStack on an internal server or shared cloud VM</span></div>
+            <div class="uc-step"><span class="step-num">2</span><span class="step-text">Add your test suites to <em>examples/</em> and register them in <em>suites.js</em></span></div>
+            <div class="uc-step"><span class="step-num">3</span><span class="step-text">Team members open the dashboard to trigger runs against any environment</span></div>
+            <div class="uc-step"><span class="step-num">4</span><span class="step-text">Results, logs, and HTML reports are stored centrally for everyone to access</span></div>
+          </div>
+          <div class="uc-code"><span class="cm"># Trigger from the dashboard — no local tools needed</span>
+POST /api/runs  { "suite": "regression", "environment": "staging" }</div>
+        </div>
+
+        <!-- 2. Release Gate / Pre-deploy Validation -->
+        <div class="uc-card">
+          <div class="uc-card-header">
+            <div class="uc-card-icon">🚀</div>
+            <div>
+              <h3>Release Gate &amp; Pre-deploy Validation</h3>
+              <span class="uc-tag uc-tag-release">Release</span>
+            </div>
+          </div>
+          <p>Block a deployment from promoting to production until a smoke suite passes. Integrate SmokeStack into your CI/CD pipeline — trigger a run, poll for completion, and fail the pipeline if any tests fail.</p>
+          <div class="uc-steps">
+            <div class="uc-step"><span class="step-num">1</span><span class="step-text">CI pipeline deploys to staging</span></div>
+            <div class="uc-step"><span class="step-num">2</span><span class="step-text">Pipeline calls <em>POST /api/runs</em> and captures the run ID</span></div>
+            <div class="uc-step"><span class="step-num">3</span><span class="step-text">Pipeline polls <em>GET /api/runs/:id</em> until status is no longer <em>running</em></span></div>
+            <div class="uc-step"><span class="step-num">4</span><span class="step-text">If <em>status === "failed"</em>, fail the pipeline — deployment is blocked</span></div>
+          </div>
+          <div class="uc-code"><span class="cm"># GitHub Actions step</span>
+<span class="hl">- name:</span> Run smoke suite
+  run: |
+    ID=$(curl -s -X POST $SMOKESTACK/api/runs \\
+      -H 'Content-Type: application/json' \\
+      -d '{"suite":"smoke","environment":"staging"}' \\
+      | jq -r .id)
+    <span class="hl">while</span> true; do
+      STATUS=$(curl -s $SMOKESTACK/api/runs/$ID | jq -r .status)
+      [ "$STATUS" = "passed" ] && exit 0
+      [ "$STATUS" = "failed" ] && exit 1
+      sleep 5
+    done</div>
+        </div>
+
+        <!-- 3. Environment Health Check -->
+        <div class="uc-card">
+          <div class="uc-card-header">
+            <div class="uc-card-icon">🩺</div>
+            <div>
+              <h3>Environment Health Check</h3>
+              <span class="uc-tag uc-tag-devops">DevOps</span>
+            </div>
+          </div>
+          <p>Quickly verify a freshly provisioned or restored environment is healthy before handing it to a team. A focused smoke suite that hits critical endpoints confirms the environment is wired up correctly.</p>
+          <div class="uc-steps">
+            <div class="uc-step"><span class="step-num">1</span><span class="step-text">Create a lightweight suite that hits 5–10 critical API endpoints or pages</span></div>
+            <div class="uc-step"><span class="step-num">2</span><span class="step-text">Trigger it against the new environment name — e.g. <em>"environment": "qa-env-14"</em></span></div>
+            <div class="uc-step"><span class="step-num">3</span><span class="step-text">A green run in under 30 seconds confirms the environment is operational</span></div>
+            <div class="uc-step"><span class="step-num">4</span><span class="step-text">The run log pinpoints exactly which check failed if something is broken</span></div>
+          </div>
+          <div class="uc-code"><span class="cm"># Check a specific named environment</span>
+POST /api/runs
+{
+  <span class="hl">"suite"</span>: "health-check",
+  <span class="hl">"environment"</span>: "qa-env-14"
+}</div>
+        </div>
+
+        <!-- 4. Self-service Test Portal -->
+        <div class="uc-card">
+          <div class="uc-card-header">
+            <div class="uc-card-icon">🧑‍💻</div>
+            <div>
+              <h3>Self-service Test Portal</h3>
+              <span class="uc-tag uc-tag-qa">QA</span>
+            </div>
+          </div>
+          <p>Developers can run the test suite for a feature branch themselves before raising a PR, without needing a QA engineer involved. Reduces feedback loop from hours to minutes.</p>
+          <div class="uc-steps">
+            <div class="uc-step"><span class="step-num">1</span><span class="step-text">Developer deploys their branch to a personal environment</span></div>
+            <div class="uc-step"><span class="step-num">2</span><span class="step-text">Triggers a suite run from the dashboard, setting environment to their branch name</span></div>
+            <div class="uc-step"><span class="step-num">3</span><span class="step-text">Views live logs as tests run — no waiting for a QA cycle</span></div>
+            <div class="uc-step"><span class="step-num">4</span><span class="step-text">Shares the run URL with reviewers as evidence in the PR description</span></div>
+          </div>
+          <div class="uc-code"><span class="cm"># Developer triggers their own run</span>
+POST /api/runs
+{
+  "suite": "api-integration",
+  <span class="hl">"environment"</span>: "feat-payments-v2"
+}</div>
+        </div>
+
+        <!-- 5. Test Evidence Repository -->
+        <div class="uc-card">
+          <div class="uc-card-header">
+            <div class="uc-card-icon">📋</div>
+            <div>
+              <h3>Test Evidence Repository</h3>
+              <span class="uc-tag uc-tag-compliance">Compliance</span>
+            </div>
+          </div>
+          <p>Regulated industries (fintech, health, enterprise SaaS) often need to prove that testing occurred before a release. SmokeStack's artifact storage provides a permanent, timestamped record of every run.</p>
+          <div class="uc-steps">
+            <div class="uc-step"><span class="step-num">1</span><span class="step-text">Run a defined suite against the release candidate</span></div>
+            <div class="uc-step"><span class="step-num">2</span><span class="step-text">HTML report, JSON results, and run log are stored with the run ID and timestamp</span></div>
+            <div class="uc-step"><span class="step-num">3</span><span class="step-text">Reference the run ID in release notes, tickets, or change records</span></div>
+            <div class="uc-step"><span class="step-num">4</span><span class="step-text">Artifacts are immutable and addressable via URL for audit review</span></div>
+          </div>
+          <div class="uc-code"><span class="cm"># Artifact URLs are permanent and shareable</span>
+/artifacts/<span class="hl">{run-id}</span>/html-report/index.html
+/artifacts/<span class="hl">{run-id}</span>/results.json
+/artifacts/<span class="hl">{run-id}</span>/run.log</div>
+        </div>
+
+        <!-- 6. Scheduled Regression -->
+        <div class="uc-card">
+          <div class="uc-card-header">
+            <div class="uc-card-icon">⏱️</div>
+            <div>
+              <h3>Scheduled Regression Testing</h3>
+              <span class="uc-tag uc-tag-devops">DevOps</span>
+            </div>
+          </div>
+          <p>Run a full regression suite on a schedule — nightly or after every deployment — to catch regressions in long-running environments that aren't covered by feature-level CI.</p>
+          <div class="uc-steps">
+            <div class="uc-step"><span class="step-num">1</span><span class="step-text">Set up a cron job or scheduled GitHub Actions workflow</span></div>
+            <div class="uc-step"><span class="step-num">2</span><span class="step-text">It calls <em>POST /api/runs</em> for each suite you want to run overnight</span></div>
+            <div class="uc-step"><span class="step-num">3</span><span class="step-text">Dashboard shows the history — spot when a test started failing between releases</span></div>
+            <div class="uc-step"><span class="step-num">4</span><span class="step-text">Extend with Slack notifications (roadmap) to alert on failures</span></div>
+          </div>
+          <div class="uc-code"><span class="cm"># GitHub Actions scheduled trigger (nightly at 2am)</span>
+<span class="hl">on:</span>
+  schedule:
+    - cron: <span class="hl">'0 2 * * *'</span>
+<span class="hl">jobs:</span>
+  nightly-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -X POST $SMOKESTACK/api/runs \\
+            -d '{"suite":"regression","environment":"production"}'</div>
+        </div>
+
+      </div>
+
+      <!-- Comparison table -->
+      <div class="compare-table-wrap">
+        <h2>SmokeStack vs. running tests locally</h2>
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>Local (dev machine)</th>
+              <th>SmokeStack</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Run tests against any environment</td>
+              <td class="partial">⚠ Needs local config</td>
+              <td class="check">✓ Any env via API param</td>
+            </tr>
+            <tr>
+              <td>Non-engineers can trigger runs</td>
+              <td class="cross">✗ Requires dev tools</td>
+              <td class="check">✓ Browser dashboard</td>
+            </tr>
+            <tr>
+              <td>Centralised run history</td>
+              <td class="cross">✗ Lost after terminal closes</td>
+              <td class="check">✓ PostgreSQL, permanent</td>
+            </tr>
+            <tr>
+              <td>Shareable artifact links</td>
+              <td class="cross">✗ Local files only</td>
+              <td class="check">✓ URLs served by API</td>
+            </tr>
+            <tr>
+              <td>CI/CD pipeline integration</td>
+              <td class="partial">⚠ Custom scripting needed</td>
+              <td class="check">✓ REST API + polling pattern</td>
+            </tr>
+            <tr>
+              <td>Parallel test execution</td>
+              <td class="partial">⚠ Blocks the machine</td>
+              <td class="check">✓ Scale runner replicas</td>
+            </tr>
+            <tr>
+              <td>Timestamped audit trail</td>
+              <td class="cross">✗ No record</td>
+              <td class="check">✓ Every run recorded with metadata</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>`;
 }
 
 // ---- Architecture View ---- //
