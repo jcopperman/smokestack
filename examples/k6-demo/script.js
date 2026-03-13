@@ -32,7 +32,7 @@ export default function () {
   // ── Request 2: fetch the users list ───────────────────────────────────────
   const users = http.get('https://jsonplaceholder.typicode.com/users');
   const usersOk = check(users, {
-    'GET /users — status 200':  (r) => r.status === 300,
+    'GET /users — status 200':  (r) => r.status === 200,
     'GET /users — 10 results':  (r) => JSON.parse(r.body).length === 10,
     'GET /users — has email':   (r) => !!JSON.parse(r.body)[0].email,
   });
