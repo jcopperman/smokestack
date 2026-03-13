@@ -7,6 +7,7 @@ const SUITES: Record<string, SuiteDefinition> = {
     description: 'End-to-end browser tests using Playwright against playwright.dev',
     type: 'playwright',
     estimatedDurationSecs: 30,
+    tags: ['smoke', 'e2e', 'browser'],
   },
   'newman-demo': {
     id: 'newman-demo',
@@ -14,6 +15,7 @@ const SUITES: Record<string, SuiteDefinition> = {
     description: 'API tests using Newman against jsonplaceholder.typicode.com',
     type: 'newman',
     estimatedDurationSecs: 15,
+    tags: ['smoke', 'api'],
   },
   'k6-demo': {
     id: 'k6-demo',
@@ -21,6 +23,7 @@ const SUITES: Record<string, SuiteDefinition> = {
     description: 'Load test against jsonplaceholder.typicode.com — 5 VUs, staged ramp, p95 latency + check-rate thresholds',
     type: 'k6',
     estimatedDurationSecs: 40,
+    tags: ['performance', 'load'],
   },
 };
 

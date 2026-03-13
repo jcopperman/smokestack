@@ -53,6 +53,7 @@ services:
       REDIS_URL: redis://redis:6379
       ARTIFACT_DIR: /artifacts
       CONCURRENCY: "2"
+      WEBHOOK_URL: ""  # set to a Slack or generic webhook URL to enable notifications
     volumes:
       - artifacts:/artifacts
       - ./examples:/suites:ro

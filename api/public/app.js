@@ -3,9 +3,11 @@
 const API = '/api';
 let suites = [];
 let pollTimer = null;
-let currentView = null; // 'list' | 'detail'
+let currentView = null; // 'list' | 'detail' | 'suites' | 'architecture' | 'use-cases'
 let currentRunId = null;
 let detailPollTimer = null;
+let currentRuns = [];   // cached last fetch for tag filtering
+let activeTag = null;   // currently selected tag filter
 
 // ---- Router ---- //
 function route() {
@@ -14,6 +16,9 @@ function route() {
   if (runMatch) {
     setActiveNav(null);
     showDetail(runMatch[1]);
+  } else if (hash === '#/suites') {
+    setActiveNav('suites');
+    showSuites();
   } else if (hash === '#/architecture') {
     setActiveNav('architecture');
     showArchitecture();
@@ -62,25 +67,38 @@ function setupModal() {
   const btnCancel = document.getElementById('btn-cancel');
   const btnTrigger = document.getElementById('btn-trigger');
   const suiteSelect = document.getElementById('suite-select');
+  const btnAddEnv = document.getElementById('btn-add-env-var');
 
   btnNew.addEventListener('click', () => overlay.classList.add('open'));
   btnCancel.addEventListener('click', () => overlay.classList.remove('open'));
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.remove('open'); });
   suiteSelect.addEventListener('change', updateSuiteDesc);
+  btnAddEnv.addEventListener('click', () => addEnvVarRow());
 
   btnTrigger.addEventListener('click', async () => {
     const suite = suiteSelect.value;
     const environment = document.getElementById('env-input').value.trim() || 'default';
     if (!suite) return;
 
+    // Collect env vars
+    const env = {};
+    document.querySelectorAll('.env-var-row').forEach(row => {
+      const k = row.querySelector('.env-key').value.trim();
+      const v = row.querySelector('.env-val').value;
+      if (k) env[k] = v;
+    });
+
     btnTrigger.disabled = true;
     btnTrigger.textContent = 'Starting…';
 
     try {
+      const body = { suite, environment };
+      if (Object.keys(env).length > 0) body.env = env;
+
       const res = await fetch(`${API}/runs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ suite, environment }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -88,8 +106,9 @@ function setupModal() {
       }
       const run = await res.json();
       overlay.classList.remove('open');
+      // Clear env vars list for next open
+      document.getElementById('env-vars-list').innerHTML = '';
       toast('Run queued successfully!', 'success');
-      // Navigate to detail view
       window.location.hash = `#/runs/${run.id}`;
     } catch (e) {
       toast(e.message, 'error');
@@ -100,11 +119,31 @@ function setupModal() {
   });
 }
 
+function addEnvVarRow(key = '', val = '') {
+  const list = document.getElementById('env-vars-list');
+  const row = document.createElement('div');
+  row.className = 'env-var-row';
+  row.innerHTML = `
+    <input class="env-key" type="text" placeholder="KEY" value="${escHtml(key)}" />
+    <span class="env-var-eq">=</span>
+    <input class="env-val" type="text" placeholder="value" value="${escHtml(val)}" />
+    <button class="btn-remove-env" title="Remove" onclick="this.closest('.env-var-row').remove()">✕</button>
+  `;
+  list.appendChild(row);
+  row.querySelector('.env-key').focus();
+}
+
 function updateSuiteDesc() {
   const sel = document.getElementById('suite-select');
   const desc = document.getElementById('suite-desc');
+  const tagsEl = document.getElementById('suite-tags');
   const s = suites.find(x => x.id === sel.value);
   desc.textContent = s ? s.description : '';
+  if (tagsEl) {
+    tagsEl.innerHTML = s && s.tags
+      ? s.tags.map(t => `<span class="tag-chip">${escHtml(t)}</span>`).join('')
+      : '';
+  }
 }
 
 // ---- List View ---- //
@@ -129,6 +168,10 @@ async function showList() {
           <button class="btn btn-ghost" id="btn-refresh" style="padding:5px 12px;font-size:12px;">↺ Refresh</button>
         </div>
       </div>
+      <div id="tag-filter-bar" class="tag-filter-bar" style="display:none;">
+        <span class="tag-filter-label">Filter by tag:</span>
+        <div id="tag-filter-chips"></div>
+      </div>
       <div id="runs-container">
         <div class="loading-state"><div class="spinner"></div> Loading runs…</div>
       </div>
@@ -139,7 +182,6 @@ async function showList() {
 
   await fetchRuns();
 
-  // Auto-refresh every 5s
   clearInterval(pollTimer);
   pollTimer = setInterval(() => {
     if (currentView === 'list') fetchRuns(true);
@@ -150,8 +192,10 @@ async function fetchRuns(silent = false) {
   try {
     const res = await fetch(`${API}/runs?limit=50`);
     const data = await res.json();
-    renderRunsTable(data.runs);
-    renderStats(data.runs);
+    currentRuns = data.runs;
+    renderTagFilterBar(currentRuns);
+    renderRunsTable(currentRuns);
+    renderStats(currentRuns);
 
     if (!silent) {
       const ind = document.getElementById('refresh-indicator');
@@ -163,6 +207,37 @@ async function fetchRuns(silent = false) {
         `<div class="empty"><div class="icon">⚠</div><h3>Could not load runs</h3><p>${e.message}</p></div>`;
     }
   }
+}
+
+function getAllTags(runs) {
+  const tags = new Set();
+  runs.forEach(r => {
+    const suite = suites.find(s => s.id === r.suite);
+    if (suite && suite.tags) suite.tags.forEach(t => tags.add(t));
+  });
+  return [...tags].sort();
+}
+
+function renderTagFilterBar(runs) {
+  const bar = document.getElementById('tag-filter-bar');
+  const chips = document.getElementById('tag-filter-chips');
+  if (!bar || !chips) return;
+
+  const tags = getAllTags(runs);
+  if (tags.length === 0) { bar.style.display = 'none'; return; }
+
+  bar.style.display = 'flex';
+  chips.innerHTML = `
+    <button class="tag-btn${activeTag === null ? ' active' : ''}" data-tag="">All</button>
+    ${tags.map(t => `<button class="tag-btn${activeTag === t ? ' active' : ''}" data-tag="${escHtml(t)}">${escHtml(t)}</button>`).join('')}
+  `;
+  chips.querySelectorAll('.tag-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeTag = btn.dataset.tag || null;
+      renderTagFilterBar(currentRuns);
+      renderRunsTable(currentRuns);
+    });
+  });
 }
 
 function renderStats(runs) {
@@ -182,12 +257,21 @@ function renderRunsTable(runs) {
   const container = document.getElementById('runs-container');
   if (!container) return;
 
-  if (!runs.length) {
+  // Apply tag filter
+  let filtered = runs;
+  if (activeTag) {
+    filtered = runs.filter(r => {
+      const suite = suites.find(s => s.id === r.suite);
+      return suite && suite.tags && suite.tags.includes(activeTag);
+    });
+  }
+
+  if (!filtered.length) {
     container.innerHTML = `
       <div class="empty">
         <div class="icon">🚀</div>
-        <h3>No runs yet</h3>
-        <p>Trigger your first test run using the <strong>New Run</strong> button.</p>
+        <h3>${runs.length ? 'No runs match this tag' : 'No runs yet'}</h3>
+        <p>${runs.length ? 'Try a different tag filter or clear it.' : 'Trigger your first test run using the <strong>New Run</strong> button.'}</p>
       </div>`;
     return;
   }
@@ -205,16 +289,21 @@ function renderRunsTable(runs) {
         </tr>
       </thead>
       <tbody>
-        ${runs.map(r => `
+        ${filtered.map(r => {
+          const suite = suites.find(s => s.id === r.suite);
+          const tagChips = suite && suite.tags
+            ? `<div class="row-tags">${suite.tags.map(t => `<span class="tag-chip tag-chip-sm">${escHtml(t)}</span>`).join('')}</div>`
+            : '';
+          return `
           <tr onclick="window.location.hash='#/runs/${r.id}'">
             <td>${badgeHtml(r.status)}</td>
-            <td class="suite-name">${escHtml(r.suite)}</td>
+            <td class="suite-name">${escHtml(r.suite)}${tagChips}</td>
             <td><span class="env-tag">${escHtml(r.environment)}</span></td>
             <td>${testCountsHtml(r)}</td>
             <td>${durationHtml(r)}</td>
             <td style="color:var(--muted);font-size:12px;">${timeAgo(r.created_at)}</td>
-          </tr>
-        `).join('')}
+          </tr>`;
+        }).join('')}
       </tbody>
     </table>`;
 }
@@ -234,7 +323,6 @@ async function showDetail(runId) {
 
   await fetchDetail(runId);
 
-  // Poll while run is active
   clearDetailPoll();
   detailPollTimer = setInterval(async () => {
     if (currentView !== 'detail' || currentRunId !== runId) {
@@ -273,6 +361,13 @@ async function fetchDetail(runId) {
 
     const isActive = run.status === 'queued' || run.status === 'running';
 
+    // Show env vars if any were set
+    const envVars = run.env_vars && Object.keys(run.env_vars).length > 0
+      ? Object.entries(run.env_vars).map(([k, v]) =>
+          `<div class="env-var-display-row"><span class="env-var-key">${escHtml(k)}</span><span class="env-var-sep">=</span><span class="env-var-value">${escHtml(v)}</span></div>`
+        ).join('')
+      : null;
+
     container.innerHTML = `
       <div class="detail-header">
         <div>
@@ -308,6 +403,11 @@ async function fetchDetail(runId) {
         </div>
       </div>
 
+      ${envVars ? `
+        <div class="section-heading" style="margin-top:0;margin-bottom:10px;">Environment Variables</div>
+        <div class="env-vars-display">${envVars}</div>
+      ` : ''}
+
       ${run.error_message ? `
         <div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--red);">
           <strong>Error:</strong> ${escHtml(run.error_message)}
@@ -320,7 +420,6 @@ async function fetchDetail(runId) {
         ${isActive && !logs.log_output ? 'Waiting for output…' : escHtml(logs.log_output || '(no output captured)')}
       </div>`;
 
-    // Auto-scroll log to bottom if active
     if (isActive) {
       const lb = document.getElementById('log-box');
       if (lb) lb.scrollTop = lb.scrollHeight;
@@ -335,7 +434,6 @@ async function fetchDetail(runId) {
 function artifactLinksHtml(run) {
   if (!run.artifact_path) return '';
   const base = `/artifacts/${run.artifact_path}`;
-
   const links = [];
 
   if (run.suite.startsWith('playwright')) {
@@ -357,6 +455,133 @@ function artifactLinksHtml(run) {
 
 function clearDetailPoll() {
   if (detailPollTimer) { clearInterval(detailPollTimer); detailPollTimer = null; }
+}
+
+// ---- Suites View ---- //
+async function showSuites() {
+  currentView = 'suites';
+  currentRunId = null;
+  clearInterval(pollTimer);
+  clearDetailPoll();
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="suites-page">
+      <div class="suites-page-header">
+        <h1 style="font-size:22px;font-weight:700;margin-bottom:4px;">Test Suites</h1>
+        <p style="color:var(--muted);font-size:14px;">Pass rate history for each registered suite.</p>
+      </div>
+      <div class="suites-grid" id="suites-grid">
+        <div class="loading-state"><div class="spinner"></div> Loading…</div>
+      </div>
+    </div>`;
+
+  const grid = document.getElementById('suites-grid');
+  if (!suites.length) {
+    grid.innerHTML = `<div class="empty"><div class="icon">📭</div><h3>No suites registered</h3></div>`;
+    return;
+  }
+
+  // Render suite cards
+  grid.innerHTML = suites.map(s => `
+    <div class="suite-card">
+      <div class="suite-card-header">
+        <div>
+          <div class="suite-card-title">${escHtml(s.name)}</div>
+          <div class="suite-card-tags">${(s.tags || []).map(t => `<span class="tag-chip">${escHtml(t)}</span>`).join('')}</div>
+        </div>
+        <span class="suite-type-badge suite-type-${s.type}">${s.type}</span>
+      </div>
+      <div class="suite-card-desc">${escHtml(s.description)}</div>
+      <div class="chart-wrap">
+        <canvas id="chart-${s.id}" height="100"></canvas>
+      </div>
+      <div class="suite-card-stats" id="stats-${s.id}" style="color:var(--muted);font-size:12px;">Loading history…</div>
+    </div>
+  `).join('');
+
+  // Load history for all suites in parallel
+  await Promise.all(suites.map(s => loadSuiteHistory(s)));
+}
+
+async function loadSuiteHistory(suite) {
+  try {
+    const res = await fetch(`${API}/suites/${suite.id}/history?limit=20`);
+    if (!res.ok) throw new Error('Failed to load history');
+    const data = await res.json();
+    const history = data.history || [];
+
+    const statsEl = document.getElementById(`stats-${suite.id}`);
+    if (statsEl) {
+      if (!history.length) {
+        statsEl.textContent = 'No runs yet.';
+      } else {
+        const last = history[history.length - 1];
+        const passRate = last.pass_rate != null ? Math.round(last.pass_rate * 100) : null;
+        const totalRuns = history.length;
+        statsEl.innerHTML = `
+          <span>${totalRuns} run${totalRuns !== 1 ? 's' : ''}</span>
+          ${passRate != null ? `<span style="margin-left:12px;color:${passRate >= 80 ? 'var(--green)' : passRate >= 50 ? 'var(--yellow)' : 'var(--red)'}">Latest pass rate: ${passRate}%</span>` : ''}
+        `;
+      }
+    }
+
+    const canvas = document.getElementById(`chart-${suite.id}`);
+    if (!canvas || !history.length) return;
+
+    // Destroy existing chart if any
+    const existing = Chart.getChart(canvas);
+    if (existing) existing.destroy();
+
+    const labels = history.map((_, i) => `#${i + 1}`);
+    const passRates = history.map(r => r.pass_rate != null ? Math.round(r.pass_rate * 100) : null);
+    const colors = passRates.map(p =>
+      p == null ? 'rgba(136,146,164,0.4)' :
+      p >= 80   ? 'rgba(34,197,94,0.7)' :
+      p >= 50   ? 'rgba(245,158,11,0.7)' :
+                  'rgba(239,68,68,0.7)'
+    );
+
+    new Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Pass rate %',
+          data: passRates,
+          backgroundColor: colors,
+          borderRadius: 4,
+          borderSkipped: false,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => ctx.raw != null ? `${ctx.raw}% passed` : 'No data',
+            },
+          },
+        },
+        scales: {
+          y: {
+            min: 0, max: 100,
+            ticks: { color: '#8892a4', font: { size: 11 }, callback: v => `${v}%` },
+            grid: { color: 'rgba(255,255,255,0.05)' },
+          },
+          x: {
+            ticks: { color: '#8892a4', font: { size: 11 } },
+            grid: { display: false },
+          },
+        },
+      },
+    });
+  } catch (e) {
+    const statsEl = document.getElementById(`stats-${suite.id}`);
+    if (statsEl) statsEl.textContent = 'Could not load history.';
+  }
 }
 
 // ---- Helpers ---- //
@@ -579,7 +804,7 @@ POST /api/runs
             <div class="uc-step"><span class="step-num">1</span><span class="step-text">Set up a cron job or scheduled GitHub Actions workflow</span></div>
             <div class="uc-step"><span class="step-num">2</span><span class="step-text">It calls <em>POST /api/runs</em> for each suite you want to run overnight</span></div>
             <div class="uc-step"><span class="step-num">3</span><span class="step-text">Dashboard shows the history — spot when a test started failing between releases</span></div>
-            <div class="uc-step"><span class="step-num">4</span><span class="step-text">Extend with Slack notifications (roadmap) to alert on failures</span></div>
+            <div class="uc-step"><span class="step-num">4</span><span class="step-text">Configure <em>WEBHOOK_URL</em> to get Slack alerts on failures</span></div>
           </div>
           <div class="uc-code"><span class="cm"># GitHub Actions scheduled trigger (nightly at 2am)</span>
 <span class="hl">on:</span>
@@ -727,14 +952,15 @@ function showArchitecture() {
         <div class="flow-node">
           <div class="node-icon">🏃</div>
           <div class="node-body">
-            <div class="node-tech">Node.js · Playwright · Newman</div>
+            <div class="node-tech">Node.js · Playwright · Newman · k6</div>
             <div class="node-title">Runner Worker</div>
-            <div class="node-desc">Picks up a job, spawns the test framework as a child process, and streams stdout/stderr to a log file. Parses JSON result output after completion to extract pass/fail counts.</div>
+            <div class="node-desc">Picks up a job, spawns the test framework as a child process, and streams stdout/stderr to a log file. Parses JSON result output after completion to extract pass/fail counts. Sends webhook/Slack notification on completion.</div>
             <div class="node-pills">
               <span class="pill">Playwright</span>
               <span class="pill">Newman</span>
+              <span class="pill">k6</span>
               <span class="pill">Streaming logs</span>
-              <span class="pill">Result parsing</span>
+              <span class="pill">Webhook notify</span>
             </div>
           </div>
         </div>
@@ -751,7 +977,7 @@ function showArchitecture() {
             <div class="node-body">
               <div class="node-tech">PostgreSQL</div>
               <div class="node-title">Run Metadata</div>
-              <div class="node-desc">Stores run records: status, pass/fail counts, duration, artifact path, and full log output.</div>
+              <div class="node-desc">Stores run records: status, pass/fail counts, duration, artifact path, env vars, and full log output.</div>
             </div>
           </div>
           <div class="flow-node">
@@ -773,13 +999,14 @@ function showArchitecture() {
         <div class="flow-node">
           <div class="node-icon">📊</div>
           <div class="node-body">
-            <div class="node-tech">Vanilla JS · Express static</div>
+            <div class="node-tech">Vanilla JS · Express static · Chart.js</div>
             <div class="node-title">Dashboard UI</div>
-            <div class="node-desc">Polls the API every 5 seconds to show live run status. Click any run to see detailed logs, test counts, and artifact links including HTML reports.</div>
+            <div class="node-desc">Polls the API every 5 seconds to show live run status. Click any run to see detailed logs, test counts, and artifact links. Suite view shows historical pass-rate bar charts.</div>
             <div class="node-pills">
               <span class="pill">Live status</span>
+              <span class="pill">Tag filtering</span>
+              <span class="pill">Pass rate charts</span>
               <span class="pill">Artifact viewer</span>
-              <span class="pill">Run history</span>
             </div>
           </div>
         </div>
@@ -814,6 +1041,11 @@ function showArchitecture() {
           <div class="tc-detail">Postman collection runner</div>
         </div>
         <div class="tech-card">
+          <div class="tc-layer">Load testing</div>
+          <div class="tc-name">k6</div>
+          <div class="tc-detail">Performance &amp; load testing</div>
+        </div>
+        <div class="tech-card">
           <div class="tc-layer">Infrastructure</div>
           <div class="tc-name">Docker + Compose</div>
           <div class="tc-detail">Local containerised stack</div>
@@ -825,7 +1057,7 @@ function showArchitecture() {
         </div>
         <div class="tech-card">
           <div class="tc-layer">Frontend</div>
-          <div class="tc-name">Vanilla JS</div>
+          <div class="tc-name">Vanilla JS + Chart.js</div>
           <div class="tc-detail">Zero-build SPA dashboard</div>
         </div>
       </div>

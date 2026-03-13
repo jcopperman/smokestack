@@ -4,6 +4,7 @@ import { Job } from 'bullmq';
 import pool from './db';
 import SUITES from './suites';
 import { runPlaywright, runNewman, runK6 } from './executor';
+import { sendNotification } from './notifier';
 import { JobData, RunUpdateFields } from './types';
 
 const ARTIFACT_DIR = process.env.ARTIFACT_DIR || '/artifacts';
@@ -19,7 +20,7 @@ async function updateRun(runId: string, fields: RunUpdateFields): Promise<void> 
 }
 
 export async function processJob(job: Job<JobData>): Promise<void> {
-  const { runId, suite, environment } = job.data;
+  const { runId, suite, environment, env = {} } = job.data;
 
   console.log(`[runner] Starting job: runId=${runId} suite=${suite} env=${environment}`);
 
@@ -44,11 +45,11 @@ export async function processJob(job: Job<JobData>): Promise<void> {
 
   try {
     if (suiteConfig.type === 'playwright') {
-      ({ exitCode, results } = await runPlaywright(suiteConfig, artifactDir, logPath));
+      ({ exitCode, results } = await runPlaywright(suiteConfig, artifactDir, logPath, env));
     } else if (suiteConfig.type === 'newman') {
-      ({ exitCode, results } = await runNewman(suiteConfig, artifactDir, logPath));
+      ({ exitCode, results } = await runNewman(suiteConfig, artifactDir, logPath, env));
     } else if (suiteConfig.type === 'k6') {
-      ({ exitCode, results } = await runK6(suiteConfig, artifactDir, logPath));
+      ({ exitCode, results } = await runK6(suiteConfig, artifactDir, logPath, env));
     } else {
       throw new Error(`Unknown suite type: ${suiteConfig.type}`);
     }
@@ -87,6 +88,13 @@ export async function processJob(job: Job<JobData>): Promise<void> {
     artifact_path: runId,
     log_output:    logOutput,
     error_message: errorMessage ?? undefined,
+  });
+
+  await sendNotification({ runId, suite, environment, status,
+    passed_tests: results?.passed ?? null,
+    failed_tests: results?.failed ?? null,
+    total_tests:  results?.total  ?? null,
+    duration_ms:  durationMs,
   });
 
   console.log(`[runner] Completed job: runId=${runId} status=${status} duration=${durationMs}ms`);

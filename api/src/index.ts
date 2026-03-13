@@ -3,7 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import runsRouter from './routes/runs';
-import SUITES from './suites';
+import suitesRouter from './routes/suites';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,10 +17,8 @@ app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Available suites
-app.get('/api/suites', (_req: Request, res: Response) => {
-  res.json(Object.values(SUITES));
-});
+// Suites API (list + history)
+app.use('/api/suites', suitesRouter);
 
 // Runs API
 app.use('/api/runs', runsRouter);

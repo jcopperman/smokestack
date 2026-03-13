@@ -12,9 +12,13 @@ CREATE TABLE IF NOT EXISTS runs (
     artifact_path TEXT,
     error_message TEXT,
     log_output    TEXT,
+    env_vars      JSONB        NOT NULL DEFAULT '{}',
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Idempotent migration for existing installs
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS env_vars JSONB NOT NULL DEFAULT '{}';
 
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs (status);

@@ -25,6 +25,7 @@ export interface JobData {
   runId: string;
   suite: string;
   environment: string;
+  env?: Record<string, string>;
 }
 
 export type RunUpdateFields = Partial<{

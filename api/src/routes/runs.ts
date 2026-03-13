@@ -19,16 +19,24 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
+  const { env } = req.body as { env?: Record<string, unknown> };
+  const sanitizedEnv: Record<string, string> = {};
+  if (env && typeof env === 'object' && !Array.isArray(env)) {
+    for (const [k, v] of Object.entries(env)) {
+      if (typeof v === 'string') sanitizedEnv[k] = v;
+    }
+  }
+
   try {
     const result = await pool.query(
-      `INSERT INTO runs (suite, environment, status)
-       VALUES ($1, $2, 'queued')
-       RETURNING id, suite, environment, status, created_at`,
-      [suite, environment]
+      `INSERT INTO runs (suite, environment, status, env_vars)
+       VALUES ($1, $2, 'queued', $3)
+       RETURNING id, suite, environment, status, env_vars, created_at`,
+      [suite, environment, JSON.stringify(sanitizedEnv)]
     );
     const run = result.rows[0];
 
-    await runQueue.add('execute', { runId: run.id, suite, environment }, { jobId: run.id });
+    await runQueue.add('execute', { runId: run.id, suite, environment, env: sanitizedEnv }, { jobId: run.id });
 
     res.status(201).json(run);
   } catch (err) {

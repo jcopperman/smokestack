@@ -386,10 +386,10 @@ smokestack/
 
 ## Roadmap
 
-- [ ] Environment variable injection per run
-- [ ] Tag-based test selection
-- [ ] Historical pass rate charts per suite
-- [ ] Slack / webhook notifications on failure
+- [x] Environment variable injection per run
+- [x] Tag-based test selection
+- [x] Historical pass rate charts per suite
+- [x] Slack / webhook notifications on run completion
 - [ ] Prometheus metrics endpoint
 - [ ] S3 / MinIO artifact storage backend
 - [ ] Flaky test detection — flag tests that pass/fail inconsistently across runs

@@ -75,7 +75,8 @@ function runCommand(cmd: string, args: string[], options: CommandOptions): Promi
 export async function runPlaywright(
   suiteConfig: RunnerSuiteConfig,
   artifactDir: string,
-  logPath: string
+  logPath: string,
+  extraEnv: Record<string, string> = {}
 ): Promise<ExecutionResult> {
   const resultsJson = path.join(artifactDir, 'results.json');
   const htmlReportDir = path.join(artifactDir, 'html-report');
@@ -84,6 +85,7 @@ export async function runPlaywright(
     ARTIFACT_DIR: artifactDir,
     PLAYWRIGHT_HTML_REPORT: htmlReportDir,
     CI: '1',
+    ...extraEnv,
   };
 
   // Use the globally-installed playwright CLI from the base Docker image.
@@ -106,7 +108,8 @@ export async function runPlaywright(
 export async function runNewman(
   suiteConfig: RunnerSuiteConfig,
   artifactDir: string,
-  logPath: string
+  logPath: string,
+  extraEnv: Record<string, string> = {}
 ): Promise<ExecutionResult> {
   const resultsJson = path.join(artifactDir, 'results.json');
   const htmlReport = path.join(artifactDir, 'report.html');
@@ -127,6 +130,7 @@ export async function runNewman(
 
   const { exitCode } = await runCommand('newman', args, {
     cwd: suiteConfig.cwd,
+    env: { ...extraEnv },
     logPath,
   });
 
@@ -142,14 +146,17 @@ export async function runNewman(
 export async function runK6(
   suiteConfig: RunnerSuiteConfig,
   artifactDir: string,
-  logPath: string
+  logPath: string,
+  extraEnv: Record<string, string> = {}
 ): Promise<ExecutionResult> {
   const summaryJson = path.join(artifactDir, 'summary.json');
 
   // Pass ARTIFACT_DIR via -e so handleSummary in the script can write summary.json.
   // --summary-export was removed in k6 v0.46; handleSummary is the replacement.
+  // Extra env vars are also passed via -e since k6 reads __ENV from -e flags, not process.env.
+  const extraArgs = Object.entries(extraEnv).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
   const { exitCode } = await runCommand(
-    'k6', ['run', '-e', `ARTIFACT_DIR=${artifactDir}`, 'script.js'],
+    'k6', ['run', '-e', `ARTIFACT_DIR=${artifactDir}`, ...extraArgs, 'script.js'],
     { cwd: suiteConfig.cwd, logPath }
   );
 
