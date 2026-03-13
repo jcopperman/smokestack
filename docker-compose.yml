@@ -45,7 +45,9 @@ services:
     restart: unless-stopped
 
   runner:
-    build: ./runner
+    build:
+      context: .
+      dockerfile: runner/Dockerfile
     environment:
       DATABASE_URL: postgresql://smokestack:smokestack@postgres:5432/smokestack
       REDIS_URL: redis://redis:6379

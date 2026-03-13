@@ -20,23 +20,19 @@ spec:
           envFrom:
             - configMapRef:
                 name: smokestack-config
+          # Examples are baked into the image at /suites — no extra volume needed.
+          # Scale replicas here to increase test execution concurrency.
           volumeMounts:
             - name: artifacts
               mountPath: /artifacts
-            - name: suites
-              mountPath: /suites
-              readOnly: true
           resources:
             requests:
               memory: "512Mi"
               cpu: "250m"
             limits:
               memory: "2Gi"
-              cpu: "1"
+              cpu: "1000m"
       volumes:
         - name: artifacts
           persistentVolumeClaim:
             claimName: artifacts-pvc
-        - name: suites
-          configMap:
-            name: smokestack-suites

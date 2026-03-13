@@ -1,5 +1,8 @@
-# Use the official Playwright image which includes Chromium, Firefox, WebKit
-# and all required system dependencies.
+# Build context: project root (so examples/ can be baked in for Kubernetes)
+# Usage:
+#   docker compose up --build          (handled automatically)
+#   docker build -f runner/Dockerfile -t smokestack-runner:latest .
+
 FROM mcr.microsoft.com/playwright:v1.42.0-jammy
 
 # Tell Playwright where the pre-installed browsers live so it doesn't try to
@@ -17,13 +20,18 @@ RUN npm install -g @playwright/test@1.42.0 newman newman-reporter-htmlextra
 WORKDIR /app
 
 # Install runner dependencies
-COPY package.json package-lock.json* ./
+COPY runner/package.json runner/package-lock.json* ./
 RUN npm install --omit=dev
 
 # Copy runner source
-COPY src/ src/
+COPY runner/src/ src/
 
-# Artifacts directory (will be overridden by the named volume in docker-compose)
+# Bake example suites into the image so the runner works in Kubernetes without
+# needing a volume mount. In Docker Compose, ./examples is also bind-mounted
+# over this at /suites, so local edits are still picked up immediately.
+COPY examples/ /suites/
+
+# Artifacts directory (overridden by the named volume / PVC at runtime)
 RUN mkdir -p /artifacts
 
 CMD ["node", "src/worker.js"]

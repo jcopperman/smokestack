@@ -1,3 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: smokestack
+data:
+  init.sql: |
+    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+    CREATE TABLE IF NOT EXISTS runs (
+        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        suite         VARCHAR(100) NOT NULL,
+        environment   VARCHAR(100) NOT NULL DEFAULT 'default',
+        status        VARCHAR(20)  NOT NULL DEFAULT 'queued',
+        total_tests   INTEGER,
+        passed_tests  INTEGER,
+        failed_tests  INTEGER,
+        duration_ms   INTEGER,
+        artifact_path TEXT,
+        error_message TEXT,
+        log_output    TEXT,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_runs_status ON runs (status);
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -36,6 +62,10 @@ spec:
               command: ["pg_isready", "-U", "smokestack"]
             initialDelaySeconds: 5
             periodSeconds: 5
+      volumes:
+        - name: init-sql
+          configMap:
+            name: postgres-init
   volumeClaimTemplates:
     - metadata:
         name: postgres-data
@@ -44,32 +74,6 @@ spec:
         resources:
           requests:
             storage: 2Gi
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: postgres-init
-  namespace: smokestack
-data:
-  init.sql: |
-    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-    CREATE TABLE IF NOT EXISTS runs (
-        id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        suite         VARCHAR(100) NOT NULL,
-        environment   VARCHAR(100) NOT NULL DEFAULT 'default',
-        status        VARCHAR(20)  NOT NULL DEFAULT 'queued',
-        total_tests   INTEGER,
-        passed_tests  INTEGER,
-        failed_tests  INTEGER,
-        duration_ms   INTEGER,
-        artifact_path TEXT,
-        error_message TEXT,
-        log_output    TEXT,
-        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs (created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_runs_status ON runs (status);
 ---
 apiVersion: v1
 kind: Service

@@ -1,3 +1,6 @@
+# ReadWriteOnce is supported by kind's default local-path provisioner.
+# Both api and runner pods run on the same single node in kind, so both can
+# mount this PVC simultaneously despite the RWO access mode.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -5,7 +8,7 @@ metadata:
   namespace: smokestack
 spec:
   accessModes:
-    - ReadWriteMany
+    - ReadWriteOnce
   resources:
     requests:
       storage: 5Gi
