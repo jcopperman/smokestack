@@ -11,11 +11,13 @@
 <body>
 
 <header class="app-header">
-  <div class="logo">Smoke<span>Stack</span></div>
+  <a href="#/" class="logo">Smoke<span>Stack</span></a>
+  <nav class="app-nav">
+    <a href="#/" class="nav-link" data-route="runs">Runs</a>
+    <a href="#/architecture" class="nav-link" data-route="architecture">Architecture</a>
+  </nav>
   <span class="spacer"></span>
-  <button class="btn btn-primary" id="btn-new-run">
-    &#9654; New Run
-  </button>
+  <button class="btn btn-primary" id="btn-new-run">&#9654; New Run</button>
 </header>
 
 <main class="main" id="app">
@@ -39,9 +41,7 @@
     <div id="suite-desc" style="font-size:12px;color:var(--muted);margin-top:-8px;margin-bottom:8px;min-height:18px;"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btn-cancel">Cancel</button>
-      <button class="btn btn-primary" id="btn-trigger">
-        &#9654; Run Suite
-      </button>
+      <button class="btn btn-primary" id="btn-trigger">&#9654; Run Suite</button>
     </div>
   </div>
 </div>

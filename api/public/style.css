@@ -48,11 +48,180 @@ a:hover { text-decoration: underline; }
   font-weight: 700;
   color: var(--text);
   letter-spacing: -0.3px;
+  text-decoration: none;
 }
-
+.app-header .logo:hover { text-decoration: none; }
 .app-header .logo span { color: var(--accent); }
 
+/* ---- Nav ---- */
+.app-nav {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+.nav-link {
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  transition: color 0.15s, background 0.15s;
+  text-decoration: none;
+}
+.nav-link:hover { color: var(--text); background: rgba(255,255,255,0.05); text-decoration: none; }
+.nav-link.active { color: var(--text); background: rgba(255,255,255,0.08); }
+
 .app-header .spacer { flex: 1; }
+
+/* ---- Architecture page ---- */
+.arch-page { max-width: 860px; margin: 0 auto; }
+
+.arch-page h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.arch-page .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 40px; }
+
+/* Flow diagram */
+.flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 48px;
+  position: relative;
+}
+
+.flow-node {
+  width: 100%;
+  max-width: 520px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 22px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  position: relative;
+  transition: border-color 0.2s, transform 0.2s;
+}
+.flow-node:hover { border-color: var(--accent); transform: translateY(-1px); }
+
+.flow-node .node-icon {
+  font-size: 26px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.flow-node .node-body { flex: 1; }
+.flow-node .node-title { font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+.flow-node .node-tech  { font-size: 11px; color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.flow-node .node-desc  { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+.flow-node .node-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+.flow-node .pill {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: rgba(99,102,241,0.12);
+  color: var(--accent-h);
+  border-radius: 999px;
+  border: 1px solid rgba(99,102,241,0.2);
+}
+
+/* Animated connector arrow between nodes */
+.flow-arrow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 48px;
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+}
+.flow-arrow .arrow-line {
+  width: 2px;
+  flex: 1;
+  background: linear-gradient(to bottom, var(--border), var(--accent));
+  position: relative;
+  overflow: hidden;
+}
+.flow-arrow .arrow-line::after {
+  content: '';
+  position: absolute;
+  top: -100%;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  background: linear-gradient(to bottom, transparent, var(--accent));
+  animation: flow-pulse 2s ease-in-out infinite;
+}
+.flow-arrow .arrow-head {
+  width: 0; height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 9px solid var(--accent);
+}
+.flow-arrow .arrow-label {
+  position: absolute;
+  left: calc(50% + 14px);
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-family: monospace;
+}
+
+@keyframes flow-pulse {
+  0%   { top: -100%; opacity: 0; }
+  20%  { opacity: 1; }
+  80%  { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* Split node row (postgres + artifacts side by side) */
+.flow-split {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+  max-width: 520px;
+}
+.flow-split .flow-node {
+  flex: 1;
+  max-width: none;
+}
+
+/* Tech stack grid */
+.tech-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.tech-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+.tech-card .tc-layer {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.tech-card .tc-name {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+.tech-card .tc-detail {
+  font-size: 12px;
+  color: var(--muted);
+}
 
 .main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
 

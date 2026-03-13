@@ -10,12 +10,23 @@ let detailPollTimer = null;
 // ---- Router ---- //
 function route() {
   const hash = window.location.hash;
-  const match = hash.match(/^#\/runs\/([^/]+)$/);
-  if (match) {
-    showDetail(match[1]);
+  const runMatch = hash.match(/^#\/runs\/([^/]+)$/);
+  if (runMatch) {
+    setActiveNav(null);
+    showDetail(runMatch[1]);
+  } else if (hash === '#/architecture') {
+    setActiveNav('architecture');
+    showArchitecture();
   } else {
+    setActiveNav('runs');
     showList();
   }
+}
+
+function setActiveNav(route) {
+  document.querySelectorAll('.nav-link').forEach(el => {
+    el.classList.toggle('active', el.dataset.route === route);
+  });
 }
 
 window.addEventListener('hashchange', route);
@@ -381,6 +392,189 @@ function escHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// ---- Architecture View ---- //
+function showArchitecture() {
+  currentView = 'architecture';
+  currentRunId = null;
+  clearInterval(pollTimer);
+  clearDetailPoll();
+
+  document.getElementById('app').innerHTML = `
+    <div class="arch-page">
+      <h1>How SmokeStack Works</h1>
+      <p class="subtitle">A queue-driven execution pipeline that separates control logic from test execution.</p>
+
+      <div class="flow">
+
+        <div class="flow-node">
+          <div class="node-icon">👤</div>
+          <div class="node-body">
+            <div class="node-tech">Trigger</div>
+            <div class="node-title">User / CI Pipeline</div>
+            <div class="node-desc">A developer clicks "New Run" in the dashboard, or a CI pipeline calls the REST API to trigger a test suite.</div>
+            <div class="node-pills">
+              <span class="pill">Dashboard UI</span>
+              <span class="pill">POST /api/runs</span>
+              <span class="pill">GitHub Actions</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-arrow">
+          <div class="arrow-line"></div>
+          <div class="arrow-head"></div>
+          <span class="arrow-label">HTTP request</span>
+        </div>
+
+        <div class="flow-node">
+          <div class="node-icon">⚡</div>
+          <div class="node-body">
+            <div class="node-tech">Node.js · Express</div>
+            <div class="node-title">API Service</div>
+            <div class="node-desc">Validates the request, creates a <code>queued</code> run record in PostgreSQL, then enqueues a job. Returns the run ID immediately — never blocks on test execution.</div>
+            <div class="node-pills">
+              <span class="pill">REST API</span>
+              <span class="pill">BullMQ producer</span>
+              <span class="pill">Serves dashboard</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-arrow">
+          <div class="arrow-line"></div>
+          <div class="arrow-head"></div>
+          <span class="arrow-label">enqueue job</span>
+        </div>
+
+        <div class="flow-node">
+          <div class="node-icon">📬</div>
+          <div class="node-body">
+            <div class="node-tech">Redis · BullMQ</div>
+            <div class="node-title">Job Queue</div>
+            <div class="node-desc">Holds pending execution jobs. Manages worker concurrency, retries failed jobs with backoff, and decouples the API from slow test execution.</div>
+            <div class="node-pills">
+              <span class="pill">Configurable concurrency</span>
+              <span class="pill">Auto-retry</span>
+              <span class="pill">Job history</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-arrow">
+          <div class="arrow-line"></div>
+          <div class="arrow-head"></div>
+          <span class="arrow-label">dequeue &amp; process</span>
+        </div>
+
+        <div class="flow-node">
+          <div class="node-icon">🏃</div>
+          <div class="node-body">
+            <div class="node-tech">Node.js · Playwright · Newman</div>
+            <div class="node-title">Runner Worker</div>
+            <div class="node-desc">Picks up a job, spawns the test framework as a child process, and streams stdout/stderr to a log file. Parses JSON result output after completion to extract pass/fail counts.</div>
+            <div class="node-pills">
+              <span class="pill">Playwright</span>
+              <span class="pill">Newman</span>
+              <span class="pill">Streaming logs</span>
+              <span class="pill">Result parsing</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-arrow">
+          <div class="arrow-line"></div>
+          <div class="arrow-head"></div>
+          <span class="arrow-label">write results &amp; artifacts</span>
+        </div>
+
+        <div class="flow-split">
+          <div class="flow-node">
+            <div class="node-icon">🗄️</div>
+            <div class="node-body">
+              <div class="node-tech">PostgreSQL</div>
+              <div class="node-title">Run Metadata</div>
+              <div class="node-desc">Stores run records: status, pass/fail counts, duration, artifact path, and full log output.</div>
+            </div>
+          </div>
+          <div class="flow-node">
+            <div class="node-icon">📦</div>
+            <div class="node-body">
+              <div class="node-tech">Docker Volume</div>
+              <div class="node-title">Artifact Storage</div>
+              <div class="node-desc">Stores HTML reports, JSON results, screenshots, and raw run logs — served by the API.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-arrow">
+          <div class="arrow-line"></div>
+          <div class="arrow-head"></div>
+          <span class="arrow-label">read &amp; display</span>
+        </div>
+
+        <div class="flow-node">
+          <div class="node-icon">📊</div>
+          <div class="node-body">
+            <div class="node-tech">Vanilla JS · Express static</div>
+            <div class="node-title">Dashboard UI</div>
+            <div class="node-desc">Polls the API every 5 seconds to show live run status. Click any run to see detailed logs, test counts, and artifact links including HTML reports.</div>
+            <div class="node-pills">
+              <span class="pill">Live status</span>
+              <span class="pill">Artifact viewer</span>
+              <span class="pill">Run history</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="section-heading">Technology Stack</div>
+      <div class="tech-grid">
+        <div class="tech-card">
+          <div class="tc-layer">Backend</div>
+          <div class="tc-name">Node.js + Express</div>
+          <div class="tc-detail">REST API &amp; static file serving</div>
+        </div>
+        <div class="tech-card">
+          <div class="tc-layer">Queue</div>
+          <div class="tc-name">Redis + BullMQ</div>
+          <div class="tc-detail">Job queue &amp; worker management</div>
+        </div>
+        <div class="tech-card">
+          <div class="tc-layer">Database</div>
+          <div class="tc-name">PostgreSQL 16</div>
+          <div class="tc-detail">Run records &amp; metadata</div>
+        </div>
+        <div class="tech-card">
+          <div class="tc-layer">Browser testing</div>
+          <div class="tc-name">Playwright</div>
+          <div class="tc-detail">UI &amp; API test framework</div>
+        </div>
+        <div class="tech-card">
+          <div class="tc-layer">API testing</div>
+          <div class="tc-name">Newman</div>
+          <div class="tc-detail">Postman collection runner</div>
+        </div>
+        <div class="tech-card">
+          <div class="tc-layer">Infrastructure</div>
+          <div class="tc-name">Docker + Compose</div>
+          <div class="tc-detail">Local containerised stack</div>
+        </div>
+        <div class="tech-card">
+          <div class="tc-layer">Orchestration</div>
+          <div class="tc-name">Kubernetes</div>
+          <div class="tc-detail">Production deployment target</div>
+        </div>
+        <div class="tech-card">
+          <div class="tc-layer">Frontend</div>
+          <div class="tc-name">Vanilla JS</div>
+          <div class="tc-detail">Zero-build SPA dashboard</div>
+        </div>
+      </div>
+
+    </div>`;
 }
 
 let toastTimer;
