@@ -22,24 +22,48 @@ Open **http://localhost:3000**
 
 ## Architecture
 
-```
-User / CI Pipeline
-       │
-       ▼  POST /api/runs
-  API Service  ──────────────────────────────────┐
-  (Express)                                      │
-       │ enqueue job                             │ serve dashboard
-       ▼                                         │ serve artifacts
-  Redis Queue                                    │
-  (BullMQ)                                       │
-       │ dequeue                                 │
-       ▼                                         │
-  Runner Worker ──► PostgreSQL  (run metadata)   │
-  (Playwright /                                  │
-   Newman)      ──► Artifact Volume (reports)    │
-                                                 │
-  Dashboard UI ◄────────────────────────────────┘
-  (Vanilla JS)
+```mermaid
+flowchart TD
+    subgraph Clients
+        UI[Dashboard\nVanilla JS SPA]
+        CI[CI Pipeline\nGitHub Actions / curl]
+    end
+
+    subgraph API Service ["API Service (Express)"]
+        REST[REST API\n/api/runs, /api/suites]
+        STATIC[Static Server\ndashboard + artifacts]
+    end
+
+    subgraph Queue
+        REDIS[(Redis\nBullMQ)]
+    end
+
+    subgraph Runner ["Runner Worker (Docker container)"]
+        WORKER[BullMQ Worker]
+        PW[Playwright\nbrowser + API tests]
+        NM[Newman\nPostman collections]
+    end
+
+    subgraph Storage
+        PG[(PostgreSQL\nrun metadata)]
+        VOL[Artifact Volume\nHTML reports, JSON, logs]
+    end
+
+    CI -->|POST /api/runs| REST
+    UI -->|POST /api/runs| REST
+    UI -->|GET /api/runs| REST
+    UI -->|GET /artifacts/...| STATIC
+
+    REST -->|enqueue job| REDIS
+    REST -->|INSERT queued run| PG
+    STATIC -->|read files| VOL
+
+    REDIS -->|dequeue job| WORKER
+    WORKER -->|spawn| PW
+    WORKER -->|spawn| NM
+    PW -->|write reports| VOL
+    NM -->|write reports| VOL
+    WORKER -->|UPDATE run status + counts| PG
 ```
 
 The API never blocks on test execution. It creates a `queued` run record and returns immediately. The runner picks up the job asynchronously, executes the tests, then writes results and artifacts back.
@@ -274,4 +298,4 @@ kubectl port-forward service/smokestack-api-svc 3000:80 -n smokestack
 - [ ] Tag-based test selection
 - [ ] Prometheus metrics endpoint
 - [ ] S3 / MinIO artifact storage backend
-- [ ] GitHub Actions CI integration
+- [x] GitHub Actions CI integration
