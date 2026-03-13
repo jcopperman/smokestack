@@ -184,3 +184,148 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Kubernetes job — proves the k8s/ manifests actually work.
+  # Creates a real kind cluster, loads the built images, applies all manifests,
+  # then runs the newman-demo suite as a smoke test.
+  # ─────────────────────────────────────────────────────────────────────────────
+  k8s-test:
+    name: Kubernetes smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Install kind ──────────────────────────────────────────────────────
+      - name: Install kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.22.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+
+      # ── 3. Create cluster ────────────────────────────────────────────────────
+      - name: Create kind cluster
+        run: kind create cluster --name smokestack
+
+      # ── 4. Build images ──────────────────────────────────────────────────────
+      # Runner build context is project root so examples/ can be COPY'd in.
+      - name: Build Docker images
+        run: |
+          docker build -t smokestack-api:latest ./api
+          docker build -t smokestack-runner:latest -f runner/Dockerfile .
+
+      # ── 5. Load images into the cluster ──────────────────────────────────────
+      # kind clusters have no access to the host's Docker daemon image store,
+      # so images must be explicitly loaded.
+      - name: Load images into kind
+        run: |
+          kind load docker-image smokestack-api:latest --name smokestack
+          kind load docker-image smokestack-runner:latest --name smokestack
+
+      # ── 6. Apply manifests ───────────────────────────────────────────────────
+      # Order matters: namespace and storage first, then dependencies (pg, redis),
+      # then the application tier. Skip ingress — not needed for CI.
+      - name: Apply manifests
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/storage.yaml
+          kubectl apply -f k8s/configmap.yaml
+          kubectl apply -f k8s/postgres.yaml
+          kubectl apply -f k8s/redis.yaml
+          kubectl apply -f k8s/api.yaml
+          kubectl apply -f k8s/runner.yaml
+
+      # ── 7. Wait for all workloads to be ready ────────────────────────────────
+      - name: Wait for workloads ready
+        run: |
+          kubectl rollout status statefulset/postgres         -n smokestack --timeout=120s
+          kubectl rollout status deployment/redis             -n smokestack --timeout=60s
+          kubectl rollout status deployment/smokestack-api    -n smokestack --timeout=120s
+          kubectl rollout status deployment/smokestack-runner -n smokestack --timeout=120s
+
+      # ── 8. Port-forward API to localhost ────────────────────────────────────
+      - name: Port-forward API
+        run: |
+          kubectl port-forward svc/smokestack-api-svc 3000:80 -n smokestack &
+          sleep 3
+
+      # ── 9. Wait for API health ───────────────────────────────────────────────
+      - name: Wait for API health
+        run: |
+          for i in $(seq 1 20); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "API is up"
+              break
+            fi
+            echo "  attempt $i — HTTP $STATUS"
+            sleep 3
+          done
+          curl -sf http://localhost:3000/api/health | jq .
+
+      # ── 10. Trigger newman-demo run ──────────────────────────────────────────
+      - name: Trigger newman-demo run
+        id: trigger
+        run: |
+          RESPONSE=$(curl -sf -X POST http://localhost:3000/api/runs \
+            -H "Content-Type: application/json" \
+            -d '{"suite":"newman-demo","environment":"ci"}')
+          echo "$RESPONSE" | jq .
+          RUN_ID=$(echo "$RESPONSE" | jq -r .id)
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "Triggered run: $RUN_ID"
+
+      # ── 11. Poll until complete ──────────────────────────────────────────────
+      - name: Wait for run to complete
+        id: poll
+        run: |
+          RUN_ID="${{ steps.trigger.outputs.run_id }}"
+          for i in $(seq 1 40); do
+            RUN=$(curl -sf "http://localhost:3000/api/runs/$RUN_ID")
+            STATUS=$(echo "$RUN" | jq -r .status)
+            echo "  [$i] status=$STATUS"
+            if [ "$STATUS" = "passed" ] || [ "$STATUS" = "failed" ] || [ "$STATUS" = "error" ]; then
+              echo "$RUN" | jq '{status, total_tests, passed_tests, failed_tests, duration_ms}'
+              echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+              break
+            fi
+            sleep 5
+          done
+
+      # ── 12. Print logs on failure ────────────────────────────────────────────
+      - name: Print run logs (on failure)
+        if: steps.poll.outputs.status != 'passed'
+        run: |
+          RUN_ID="${{ steps.trigger.outputs.run_id }}"
+          curl -sf "http://localhost:3000/api/runs/$RUN_ID/logs" | jq -r .log_output
+
+      # ── 13. Assert passed ────────────────────────────────────────────────────
+      - name: Assert run passed
+        run: |
+          STATUS="${{ steps.poll.outputs.status }}"
+          if [ "$STATUS" != "passed" ]; then
+            echo "::error ::Run status was '$STATUS' — expected 'passed'"
+            exit 1
+          fi
+          echo "All tests passed on Kubernetes!"
+
+      # ── 14. Cluster diagnostics on failure ───────────────────────────────────
+      - name: Cluster diagnostics (on failure)
+        if: failure()
+        run: |
+          echo "=== Pods ==="
+          kubectl get pods -n smokestack
+          echo "=== API logs ==="
+          kubectl logs -l app=smokestack-api -n smokestack --tail=50 || true
+          echo "=== Runner logs ==="
+          kubectl logs -l app=smokestack-runner -n smokestack --tail=100 || true
+
+      # ── 15. Tear down ────────────────────────────────────────────────────────
+      - name: Delete kind cluster
+        if: always()
+        run: kind delete cluster --name smokestack
