@@ -14,11 +14,8 @@ name: Release Gate (SmokeStack example)
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
-  # Trigger on pushes to main (after deployment)
-  push:
-    branches: [main]
-
-  # Or trigger manually with environment override
+  # Manual trigger only — requires SMOKESTACK_URL secret to point at a hosted instance.
+  # Remove this comment and add a push/pull_request trigger once you have hosting set up.
   workflow_dispatch:
     inputs:
       suite:
