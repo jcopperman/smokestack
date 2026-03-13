@@ -140,8 +140,8 @@ Browser and API tests using Playwright against public test sites.
 
 | File | Tests | What it covers |
 |---|---|---|
-| `tests/smoke.spec.js` | 5 | UI: homepage title, CTA button, navigation, sidebar, search |
-| `tests/api.spec.js` | 6 | API: GET/POST posts, filter by userId, GET users, 404 handling |
+| `tests/smoke.spec.ts` | 5 | UI: homepage title, CTA button, navigation, sidebar, search |
+| `tests/api.spec.ts` | 6 | API: GET/POST posts, filter by userId, GET users, 404 handling |
 
 ### newman-demo
 
@@ -174,8 +174,8 @@ Pass/fail is determined by threshold outcomes. Check passes and fails map to `pa
 
 **2. Register the suite** in both registry files:
 
-```js
-// api/src/suites.js  — controls the dashboard dropdown and /api/suites
+```ts
+// api/src/suites.ts  — controls the dashboard dropdown and /api/suites
 'your-suite': {
   id: 'your-suite',
   name: 'Your Suite Name',
@@ -184,7 +184,7 @@ Pass/fail is determined by threshold outcomes. Check passes and fails map to `pa
   estimatedDurationSecs: 30,
 }
 
-// runner/src/suites.js  — controls how the runner executes it
+// runner/src/suites.ts  — controls how the runner executes it
 'your-suite': {
   type: 'playwright',
   cwd: '/suites/your-suite',
@@ -193,9 +193,9 @@ Pass/fail is determined by threshold outcomes. Check passes and fails map to `pa
 
 **3. Suite-specific setup:**
 
-- **Playwright** — include a `playwright.config.js` that reads `process.env.ARTIFACT_DIR` for reporter output paths. See [examples/playwright-demo/playwright.config.js](examples/playwright-demo/playwright.config.js).
+- **Playwright** — include a `playwright.config.ts` that reads `process.env.ARTIFACT_DIR` for reporter output paths. See [examples/playwright-demo/playwright.config.ts](examples/playwright-demo/playwright.config.ts).
 - **Newman** — include a `collection.json`. An `environment.json` in the same directory is loaded automatically if present.
-- **k6** — name your entry point `script.js` and export a `handleSummary` function that writes to `${__ENV.ARTIFACT_DIR}/summary.json`. See [examples/k6-demo/script.js](examples/k6-demo/script.js).
+- **k6** — name your entry point `script.js` and export a `handleSummary` function that writes to `${__ENV.ARTIFACT_DIR}/summary.json`. See [examples/k6-demo/script.js](examples/k6-demo/script.js). (k6 stays as JS — it doesn't run TypeScript natively.)
 
 No rebuild needed — `examples/` is bind-mounted as a live volume in Docker Compose.
 
@@ -326,6 +326,7 @@ kubectl port-forward service/smokestack-api-svc 3000:80 -n smokestack
 
 | Layer | Technology |
 |---|---|
+| Language | TypeScript 5.4 (compiled to CommonJS via `tsc`) |
 | API | Node.js + Express |
 | Queue | Redis + BullMQ |
 | Database | PostgreSQL 16 |
@@ -345,20 +346,24 @@ kubectl port-forward service/smokestack-api-svc 3000:80 -n smokestack
 smokestack/
 ├── api/                        # Express API + dashboard
 │   ├── src/
-│   │   ├── index.js            # App entry, routes, static middleware
-│   │   ├── routes/runs.js      # /api/runs endpoints
-│   │   ├── suites.js           # Suite registry (API side — dashboard dropdown)
-│   │   ├── queue.js            # BullMQ job producer
-│   │   └── db.js               # PostgreSQL pool
-│   └── public/                 # Dashboard SPA (index.html, app.js, style.css)
+│   │   ├── index.ts            # App entry, routes, static middleware
+│   │   ├── types.ts            # Shared TypeScript types (SuiteDefinition, RunRecord, …)
+│   │   ├── routes/runs.ts      # /api/runs endpoints
+│   │   ├── suites.ts           # Suite registry (API side — dashboard dropdown)
+│   │   ├── queue.ts            # BullMQ job producer
+│   │   └── db.ts               # PostgreSQL pool
+│   ├── public/                 # Dashboard SPA (index.html, app.js, style.css)
+│   └── tsconfig.json
 │
 ├── runner/                     # Test execution worker
-│   └── src/
-│       ├── worker.js           # BullMQ worker entry point
-│       ├── processor.js        # Job handler: setup → execute → parse → persist
-│       ├── executor.js         # Spawns playwright / newman / k6 processes
-│       ├── suites.js           # Suite registry (runner side — execution config)
-│       └── db.js               # PostgreSQL pool
+│   ├── src/
+│   │   ├── worker.ts           # BullMQ worker entry point
+│   │   ├── processor.ts        # Job handler: setup → execute → parse → persist
+│   │   ├── executor.ts         # Spawns playwright / newman / k6 processes
+│   │   ├── suites.ts           # Suite registry (runner side — execution config)
+│   │   ├── types.ts            # Shared TypeScript types (RunnerSuiteConfig, TestResults, …)
+│   │   └── db.ts               # PostgreSQL pool
+│   └── tsconfig.json
 │
 ├── examples/                   # Example test suites
 │   ├── playwright-demo/        # 11 tests: 5 UI + 6 API
