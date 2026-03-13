@@ -148,4 +148,36 @@ function parseNewmanResults(jsonPath) {
   }
 }
 
-module.exports = { runPlaywright, runNewman };
+/**
+ * Execute a k6 performance test suite.
+ * Returns { exitCode, results } where results = { total, passed, failed }.
+ * "tests" are mapped to k6 checks (each check() assertion counts as one test).
+ */
+async function runK6(suiteConfig, artifactDir, logPath) {
+  const summaryJson = path.join(artifactDir, 'summary.json');
+
+  const { exitCode } = await runCommand(
+    'k6', ['run', '--summary-export', summaryJson, 'script.js'],
+    { cwd: suiteConfig.cwd, logPath }
+  );
+
+  const results = parseK6Results(summaryJson);
+  return { exitCode, results };
+}
+
+function parseK6Results(jsonPath) {
+  try {
+    if (!fs.existsSync(jsonPath)) return null;
+    const raw    = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+    const checks = raw.metrics && raw.metrics.checks;
+    if (!checks) return null;
+    const passed = checks.values.passes || 0;
+    const failed = checks.values.fails  || 0;
+    return { total: passed + failed, passed, failed };
+  } catch (e) {
+    console.error('Failed to parse k6 results:', e.message);
+    return null;
+  }
+}
+
+module.exports = { runPlaywright, runNewman, runK6 };

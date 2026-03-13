@@ -105,6 +105,7 @@ flowchart LR
 | Runner base image | `mcr.microsoft.com/playwright:v1.42.0-jammy` |
 | Browser testing | Playwright 1.42 |
 | API testing | Newman + newman-reporter-htmlextra |
+| Performance testing | k6 |
 | Dashboard | Vanilla HTML/CSS/JS (zero build step) |
 | Infrastructure | Docker + Docker Compose |
 | Orchestration | Kubernetes (manifests in `k8s/`) |
@@ -247,6 +248,16 @@ Playwright tests split across two files:
 
 - `tests/smoke.spec.js` — 5 UI tests on [playwright.dev](https://playwright.dev): homepage title, "Get started" CTA, navigation, sidebar, search
 - `tests/api.spec.js` — 6 API tests on [jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com): GET posts, GET single post, POST create, filter by userId, GET users, 404 handling
+
+### k6-demo
+
+k6 load test with staged ramp-up against [jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com):
+
+- **5 virtual users** ramped over 10s, held for 20s, then ramped down
+- **3 requests per iteration**: GET post, GET users list, POST create post
+- **8 checks** across all requests (status codes, response shape, latency)
+- **Thresholds**: p95 latency < 2s · HTTP error rate < 5% · check pass rate > 95%
+- SmokeStack maps k6 check passes/fails to `passed_tests`/`failed_tests`; threshold violations set run status to `failed`
 
 ### newman-demo
 

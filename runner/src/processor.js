@@ -2,7 +2,7 @@ const fs   = require('fs');
 const path = require('path');
 const db   = require('./db');
 const SUITES = require('./suites');
-const { runPlaywright, runNewman } = require('./executor');
+const { runPlaywright, runNewman, runK6 } = require('./executor');
 
 const ARTIFACT_DIR = process.env.ARTIFACT_DIR || '/artifacts';
 
@@ -48,6 +48,8 @@ async function processJob(job) {
       ({ exitCode, results } = await runPlaywright(suiteConfig, artifactDir, logPath));
     } else if (suiteConfig.type === 'newman') {
       ({ exitCode, results } = await runNewman(suiteConfig, artifactDir, logPath));
+    } else if (suiteConfig.type === 'k6') {
+      ({ exitCode, results } = await runK6(suiteConfig, artifactDir, logPath));
     } else {
       throw new Error(`Unknown suite type: ${suiteConfig.type}`);
     }

@@ -15,6 +15,13 @@ const SUITES = {
     type: 'newman',
     estimatedDurationSecs: 15,
   },
+  'k6-demo': {
+    id: 'k6-demo',
+    name: 'k6 Performance Demo',
+    description: 'Load test against jsonplaceholder.typicode.com — 5 VUs, staged ramp, p95 latency + check-rate thresholds',
+    type: 'k6',
+    estimatedDurationSecs: 40,
+  },
 };
 
 module.exports = SUITES;

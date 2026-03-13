@@ -17,6 +17,10 @@ ENV NODE_PATH=/usr/lib/node_modules
 # Also install Newman and its HTML reporter.
 RUN npm install -g @playwright/test@1.42.0 newman newman-reporter-htmlextra
 
+# Install k6 for performance/load testing
+RUN curl -L https://github.com/grafana/k6/releases/download/v0.54.0/k6-v0.54.0-linux-amd64.tar.gz \
+    | tar xz --strip-components=1 -C /usr/local/bin k6-v0.54.0-linux-amd64/k6
+
 WORKDIR /app
 
 # Install runner dependencies

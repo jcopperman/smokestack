@@ -10,6 +10,10 @@ const SUITES = {
     type: 'newman',
     cwd: '/suites/newman-demo',
   },
+  'k6-demo': {
+    type: 'k6',
+    cwd: '/suites/k6-demo',
+  },
 };
 
 module.exports = SUITES;
