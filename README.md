@@ -195,6 +195,18 @@ No rebuild needed — `examples/` is bind-mounted as a live volume in Docker Com
 
 ---
 
+## Documentation
+
+| Guide | Audience | Description |
+|---|---|---|
+| [Quickstart](docs/quickstart.md) | Everyone | Get running in 5 minutes with Docker Compose |
+| [Adding Test Suites](docs/adding-suites.md) | QA engineers | Register Playwright, Newman, and k6 suites |
+| [API Reference](docs/api-reference.md) | Developers | Full REST API with request/response examples |
+| [Configuration](docs/configuration.md) | DevOps | Env vars, Slack notifications, storage, production checklist |
+| [CI/CD Integration](docs/cicd-integration.md) | DevOps / Developers | GitHub Actions, GitLab CI, shell script gate |
+
+---
+
 ## CI / CD integration
 
 The included GitHub Actions workflows exercise the full platform on every push:

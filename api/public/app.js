@@ -360,6 +360,10 @@ async function fetchDetail(runId) {
     const logs = logsRes.ok ? await logsRes.json() : { log_output: '' };
 
     const isActive = run.status === 'queued' || run.status === 'running';
+    const isFailed = run.status === 'failed' || run.status === 'error';
+
+    // Fetch and parse failure details from results artifact (only when complete and failed)
+    const failures = (!isActive && isFailed) ? await fetchFailureDetails(run) : [];
 
     // Show env vars if any were set
     const envVars = run.env_vars && Object.keys(run.env_vars).length > 0
@@ -367,6 +371,10 @@ async function fetchDetail(runId) {
           `<div class="env-var-display-row"><span class="env-var-key">${escHtml(k)}</span><span class="env-var-sep">=</span><span class="env-var-value">${escHtml(v)}</span></div>`
         ).join('')
       : null;
+
+    const logContent = isActive && !logs.log_output
+      ? 'Waiting for output…'
+      : renderLog(logs.log_output || '(no output captured)');
 
     container.innerHTML = `
       <div class="detail-header">
@@ -389,7 +397,7 @@ async function fetchDetail(runId) {
           <div class="lbl">Total Tests</div>
           <div class="val">${run.total_tests ?? '—'}</div>
         </div>
-        <div class="detail-stat" style="${run.passed_tests > 0 ? 'color:var(--green)' : ''}">
+        <div class="detail-stat">
           <div class="lbl">Passed</div>
           <div class="val" style="color:${run.passed_tests > 0 ? 'var(--green)' : 'inherit'}">${run.passed_tests ?? '—'}</div>
         </div>
@@ -403,32 +411,216 @@ async function fetchDetail(runId) {
         </div>
       </div>
 
-      ${envVars ? `
-        <div class="section-heading" style="margin-top:0;margin-bottom:10px;">Environment Variables</div>
-        <div class="env-vars-display">${envVars}</div>
-      ` : ''}
+      ${failures.length ? failuresPanelHtml(failures) : ''}
 
       ${run.error_message ? `
-        <div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:13px;color:var(--red);">
+        <div class="error-banner">
           <strong>Error:</strong> ${escHtml(run.error_message)}
         </div>` : ''}
 
+      ${envVars ? `
+        <div class="section-heading" style="margin-bottom:10px;">Environment Variables</div>
+        <div class="env-vars-display">${envVars}</div>
+      ` : ''}
+
       ${artifactLinksHtml(run)}
 
-      <div class="section-heading" style="margin-top:24px;">Output Log</div>
-      <div class="log-box" id="log-box">
-        ${isActive && !logs.log_output ? 'Waiting for output…' : escHtml(logs.log_output || '(no output captured)')}
-      </div>`;
+      <div class="log-section-header">
+        <span class="section-heading" style="margin:0;">Output Log</span>
+        ${failures.length ? `<button class="btn btn-ghost" id="btn-jump-error" style="padding:3px 10px;font-size:12px;">↓ Jump to first failure</button>` : ''}
+      </div>
+      <div class="log-box" id="log-box">${logContent}</div>`;
 
-    if (isActive) {
-      const lb = document.getElementById('log-box');
-      if (lb) lb.scrollTop = lb.scrollHeight;
+    const lb = document.getElementById('log-box');
+    if (lb) {
+      if (isActive) {
+        lb.scrollTop = lb.scrollHeight;
+      }
+      const jumpBtn = document.getElementById('btn-jump-error');
+      if (jumpBtn) {
+        jumpBtn.addEventListener('click', () => {
+          const firstError = lb.querySelector('.log-error');
+          if (firstError) firstError.scrollIntoView({ block: 'center' });
+        });
+      }
     }
   } catch (e) {
     if (container) {
       container.innerHTML = `<div class="empty"><div class="icon">⚠</div><h3>Error loading run</h3><p>${escHtml(e.message)}</p></div>`;
     }
   }
+}
+
+// ---- Failure detail parsing ---- //
+
+async function fetchFailureDetails(run) {
+  if (!run.artifact_path) return [];
+  const base = `/artifacts/${run.artifact_path}`;
+  const suiteType = suites.find(s => s.id === run.suite)?.type;
+
+  try {
+    if (suiteType === 'playwright') {
+      const res = await fetch(`${base}/results.json`);
+      if (!res.ok) return [];
+      return parsePlaywrightFailures(await res.json());
+    }
+    if (suiteType === 'newman') {
+      const res = await fetch(`${base}/results.json`);
+      if (!res.ok) return [];
+      return parseNewmanFailures(await res.json());
+    }
+    if (suiteType === 'k6') {
+      const res = await fetch(`${base}/summary.json`);
+      if (!res.ok) return [];
+      return parseK6Failures(await res.json());
+    }
+  } catch (_) { /* artifact may not exist */ }
+  return [];
+}
+
+function parsePlaywrightFailures(json) {
+  const failures = [];
+
+  // Recursively find the deepest step that has an error
+  function findFailingStep(steps) {
+    for (const step of steps || []) {
+      if (step.error) {
+        return findFailingStep(step.steps) || step;
+      }
+    }
+    return null;
+  }
+
+  // Strip Playwright's verbose call log from the error message, keep the assertion lines
+  function cleanMessage(raw) {
+    const lines = raw.split('\n');
+    const meaningful = [];
+    for (const line of lines) {
+      if (line === 'Call log:') break;          // everything after this is noise
+      if (/^\s+- /.test(line)) continue;        // skip call log indented lines
+      meaningful.push(line);
+    }
+    return meaningful.slice(0, 8).join('\n').trim();
+  }
+
+  function walk(suite, path) {
+    const prefix = path ? path + ' › ' : '';
+    (suite.specs || []).forEach(spec => {
+      (spec.tests || []).forEach(test => {
+        if (test.status === 'unexpected') {
+          const result = (test.results || []).find(r => r.status === 'failed' || r.error);
+          if (!result) return;
+
+          const failingStep = findFailingStep(result.steps || []);
+          const stepTitle = failingStep?.title || null;
+
+          const rawMsg = result.error?.message || 'Test failed';
+          const message = cleanMessage(rawMsg);
+
+          // Extract file:line from stack trace
+          const stack = result.error?.stack || '';
+          const locMatch = stack.match(/at .+?([^\\/]+\.spec\.[jt]s:\d+:\d+)/);
+          const location = locMatch ? locMatch[1] : null;
+
+          failures.push({ test: prefix + spec.title, step: stepTitle, message, location });
+        }
+      });
+    });
+    (suite.suites || []).forEach(child => walk(child, prefix + (suite.title || '')));
+  }
+  (json.suites || []).forEach(s => walk(s, ''));
+  return failures;
+}
+
+function parseNewmanFailures(json) {
+  return (json.run?.failures || []).map(f => {
+    const reqName = f.source?.name || 'Unknown request';
+    const assertName = f.error?.test || f.error?.name || 'Assertion';
+    // Newman message often contains "expected X to Y | AssertionError: ..."
+    const raw = f.error?.message || 'Assertion failed';
+    const message = raw.replace(/\s*\|.*$/, '').trim(); // strip duplicate after pipe
+    return { test: `${reqName} — ${assertName}`, step: null, message, location: null };
+  });
+}
+
+function parseK6Failures(json) {
+  const failures = [];
+
+  // Failed thresholds — include actual measured value, formatted correctly
+  for (const [metric, data] of Object.entries(json.metrics || {})) {
+    for (const [expr, result] of Object.entries(data.thresholds || {})) {
+      if (!result.ok) {
+        const key = expr.split(/[<>=!]/)[0].trim(); // e.g. "rate" from "rate>0.95", "p(95)" from "p(95)<500"
+        const actual = data.values?.[key];
+        let actualStr = '';
+        if (actual != null && typeof actual === 'number') {
+          // Values in 0–1 range are rates — show as percentage
+          const isRate = actual >= 0 && actual <= 1 && (key === 'rate' || data.type === 'rate');
+          actualStr = isRate
+            ? ` (actual: ${(actual * 100).toFixed(1)}%)`
+            : ` (actual: ${actual.toFixed(1)}ms)`;
+        }
+        failures.push({
+          test: `Threshold: ${metric}`,
+          step: null,
+          message: `${expr} — FAILED${actualStr}`,
+          location: null,
+        });
+      }
+    }
+  }
+
+  // Individual failed checks
+  function collectChecks(group) {
+    (group.checks || []).forEach(c => {
+      if (c.fails > 0) {
+        const total = c.passes + c.fails;
+        const pct = Math.round((c.fails / total) * 100);
+        const msg = c.passes === 0
+          ? `Failed on all ${total} iterations — assertion always returned false`
+          : `${c.fails} of ${total} iterations failed (${pct}%)`;
+        failures.push({ test: `Check: ${c.name}`, step: null, message: msg, location: null });
+      }
+    });
+    (group.groups || []).forEach(collectChecks);
+  }
+  if (json.root_group) collectChecks(json.root_group);
+  return failures;
+}
+
+function failuresPanelHtml(failures) {
+  return `
+    <div class="failures-panel">
+      <div class="failures-panel-header">
+        <span class="failures-panel-title">✗ ${failures.length} failure${failures.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="failures-list">
+        ${failures.map(f => `
+          <div class="failure-item">
+            <div class="failure-test">${escHtml(f.test)}</div>
+            ${f.step ? `<div class="failure-step">↳ ${escHtml(f.step)}</div>` : ''}
+            <div class="failure-message">${escHtml(f.message)}</div>
+            ${f.location ? `<div class="failure-location">at ${escHtml(f.location)}</div>` : ''}
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+// Colour-code log lines: error lines red, pass lines green, warnings yellow
+function renderLog(text) {
+  return escHtml(text)
+    .split('\n')
+    .map(line => {
+      const l = line.toLowerCase();
+      if (/\berror\b|✗|✘|\bfail\b|failed|unexpected|enoent|timed out|assertion|× /.test(l))
+        return `<span class="log-error">${line}</span>`;
+      if (/✓|passed|success|\bok\b| ok |all tests/.test(l))
+        return `<span class="log-pass">${line}</span>`;
+      if (/warn(?:ing)?|deprecated/.test(l))
+        return `<span class="log-warn">${line}</span>`;
+      return line;
+    })
+    .join('\n');
 }
 
 function artifactLinksHtml(run) {
@@ -516,12 +708,17 @@ async function loadSuiteHistory(suite) {
       if (!history.length) {
         statsEl.textContent = 'No runs yet.';
       } else {
-        const last = history[history.length - 1];
-        const passRate = last.pass_rate != null ? Math.round(last.pass_rate * 100) : null;
+        // history is ordered newest-first from the API
+        const latest = history[0];
+        const passRate = latest.pass_rate != null ? Math.round(latest.pass_rate * 100) : null;
         const totalRuns = history.length;
+        const statusColor = latest.status === 'passed' ? 'var(--green)'
+          : latest.status === 'failed' ? 'var(--red)' : 'var(--yellow)';
         statsEl.innerHTML = `
           <span>${totalRuns} run${totalRuns !== 1 ? 's' : ''}</span>
-          ${passRate != null ? `<span style="margin-left:12px;color:${passRate >= 80 ? 'var(--green)' : passRate >= 50 ? 'var(--yellow)' : 'var(--red)'}">Latest pass rate: ${passRate}%</span>` : ''}
+          <span style="margin-left:12px;color:${statusColor}">
+            Latest: ${latest.status}${passRate != null ? ` (${passRate}% passed)` : ''}
+          </span>
         `;
       }
     }
@@ -533,14 +730,19 @@ async function loadSuiteHistory(suite) {
     const existing = Chart.getChart(canvas);
     if (existing) existing.destroy();
 
-    const labels = history.map((_, i) => `#${i + 1}`);
-    const passRates = history.map(r => r.pass_rate != null ? Math.round(r.pass_rate * 100) : null);
-    const colors = passRates.map(p =>
-      p == null ? 'rgba(136,146,164,0.4)' :
-      p >= 80   ? 'rgba(34,197,94,0.7)' :
-      p >= 50   ? 'rgba(245,158,11,0.7)' :
-                  'rgba(239,68,68,0.7)'
-    );
+    // Reverse so oldest run is on the left
+    const ordered = [...history].reverse();
+
+    const labels = ordered.map((_, i) => `#${i + 1}`);
+    const passRates = ordered.map(r => r.pass_rate != null ? Math.round(r.pass_rate * 100) : 0);
+
+    // Bar colour driven by run STATUS, not pass-rate percentage
+    const colors = ordered.map(r => {
+      if (r.status === 'passed') return 'rgba(34,197,94,0.75)';
+      if (r.status === 'failed') return 'rgba(239,68,68,0.75)';
+      if (r.status === 'error')  return 'rgba(245,158,11,0.75)';
+      return 'rgba(136,146,164,0.4)';
+    });
 
     new Chart(canvas, {
       type: 'bar',
@@ -561,7 +763,11 @@ async function loadSuiteHistory(suite) {
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: ctx => ctx.raw != null ? `${ctx.raw}% passed` : 'No data',
+              label: (ctx) => {
+                const r = ordered[ctx.dataIndex];
+                const pr = r.pass_rate != null ? ` — ${Math.round(r.pass_rate * 100)}% passed` : '';
+                return `${r.status}${pr}`;
+              },
             },
           },
         },
