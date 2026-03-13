@@ -59,7 +59,7 @@ docker compose up
 
 Open **http://localhost:3000**, click **▶ New Run**, choose a suite and environment, and hit **Run Suite**.
 
-![SmokeStack dashboard showing recent runs with pass/fail status, results, and duration](smokestack-fe.png)
+![SmokeStack dashboard showing recent runs with pass/fail status, results, and duration](docs/smokestack-fe.png)
 
 To wipe all run history and artifacts:
 ```bash
