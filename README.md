@@ -1,8 +1,8 @@
 # SmokeStack
 
-A lightweight, containerised QA execution platform. Trigger automated test suites on demand, track results, and view reports — all from a single dashboard.
+A self-hosted QA execution platform. Trigger browser, API, and performance test suites on demand from a dashboard or CI pipeline — results, logs, and HTML reports in one place.
 
-```
+```bash
 docker compose up --build
 ```
 
@@ -12,11 +12,216 @@ Open **http://localhost:3000**
 
 ## What it does
 
-- Trigger Playwright or Newman test suites via the dashboard or REST API
-- Executes tests inside an isolated container with no setup required
-- Streams live logs and stores pass/fail counts per run
-- Links to HTML reports, JSON results, and raw logs as artifacts
-- Auto-refreshes run status every few seconds
+| Capability | Detail |
+|---|---|
+| Test execution | Runs Playwright, Newman, and k6 suites in isolated containers |
+| Dashboard | Trigger runs, monitor status, view pass/fail counts in real time |
+| Reports | HTML reports, JSON results, and raw logs stored per run |
+| REST API | Trigger and query runs programmatically from any CI pipeline |
+| Release gate | Block a deployment if tests fail — works with GitHub Actions or any CI tool |
+| Environments | Tag each run with an environment name (`staging`, `production`, etc.) |
+
+---
+
+## Supported test types
+
+| Type | Tool | Best for |
+|---|---|---|
+| Browser / E2E | [Playwright](https://playwright.dev) | UI flows, navigation, visual checks |
+| API functional | [Newman](https://learning.postman.com/docs/collections/using-newman-cli/command-line-integration-with-newman/) (Postman collections) | Contract testing, endpoint assertions |
+| Performance / load | [k6](https://k6.io) | Throughput, latency thresholds, error rates |
+
+---
+
+## Quick start
+
+**Requirements:** Docker Desktop
+
+```bash
+# First run — builds images (5–10 min, Playwright base image is large)
+docker compose up --build
+
+# Subsequent runs
+docker compose up
+```
+
+Open **http://localhost:3000**, click **▶ New Run**, choose a suite and environment, and hit **Run Suite**.
+
+To wipe all run history and artifacts:
+```bash
+docker compose down -v
+```
+
+---
+
+## Triggering a run
+
+### From the dashboard
+
+Click **▶ New Run** in the top-right corner, select a suite and environment, and submit.
+
+### From the CLI
+
+```bash
+curl -X POST http://localhost:3000/api/runs \
+  -H "Content-Type: application/json" \
+  -d '{"suite": "playwright-demo", "environment": "staging"}'
+```
+
+Response:
+```json
+{
+  "id": "2bcaa19b-967b-4dd6-acca-fae640ac0367",
+  "suite": "playwright-demo",
+  "environment": "staging",
+  "status": "queued",
+  "created_at": "2026-03-13T06:00:00.000Z"
+}
+```
+
+Poll until complete:
+```bash
+curl http://localhost:3000/api/runs/2bcaa19b-967b-4dd6-acca-fae640ac0367
+```
+
+### From GitHub Actions (release gate)
+
+```yaml
+- name: Trigger smoke tests
+  run: |
+    RUN_ID=$(curl -sf -X POST "$SMOKESTACK_URL/api/runs" \
+      -H "Content-Type: application/json" \
+      -d '{"suite":"smoke","environment":"staging"}' | jq -r .id)
+
+- name: Wait for result
+  run: |
+    for i in $(seq 1 60); do
+      STATUS=$(curl -sf "$SMOKESTACK_URL/api/runs/$RUN_ID" | jq -r .status)
+      [ "$STATUS" = "passed" ] && exit 0
+      [ "$STATUS" = "failed" ] || [ "$STATUS" = "error" ] && exit 1
+      sleep 5
+    done
+```
+
+See [.github/workflows/release-gate.yml](.github/workflows/release-gate.yml) for the full template.
+
+---
+
+## Reading results
+
+Each run produces:
+
+| Field | Meaning |
+|---|---|
+| `status` | `queued` → `running` → `passed` / `failed` / `error` |
+| `total_tests` | Total assertions or checks executed |
+| `passed_tests` | Assertions that passed |
+| `failed_tests` | Assertions that failed |
+| `duration_ms` | Total wall-clock time for the run |
+
+**Artifacts** are accessible directly from the dashboard or via URL:
+
+| Artifact | URL |
+|---|---|
+| Playwright HTML report | `/artifacts/:runId/html-report/index.html` |
+| Newman HTML report | `/artifacts/:runId/report.html` |
+| JSON results | `/artifacts/:runId/results.json` |
+| Raw log output | `/artifacts/:runId/run.log` |
+
+---
+
+## Example suites
+
+Three example suites are included and run out of the box.
+
+### playwright-demo
+
+Browser and API tests using Playwright against public test sites.
+
+| File | Tests | What it covers |
+|---|---|---|
+| `tests/smoke.spec.js` | 5 | UI: homepage title, CTA button, navigation, sidebar, search |
+| `tests/api.spec.js` | 6 | API: GET/POST posts, filter by userId, GET users, 404 handling |
+
+### newman-demo
+
+Postman collection run via Newman against [jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com).
+
+| Folder | Requests | Assertions |
+|---|---|---|
+| Posts | GET all, GET one, POST create, GET with filter | Status codes, response shape, response time |
+| Users | GET all, GET one | Status codes, array length |
+| Todos | GET incomplete | Status code, filter correctness |
+
+### k6-demo
+
+Load test with staged virtual user ramp-up.
+
+| Setting | Value |
+|---|---|
+| Virtual users | 5 (ramp 10s → hold 20s → ramp down 5s) |
+| Requests per iteration | 3 (GET post, GET users, POST create) |
+| Checks | 8 assertions across all requests |
+| Thresholds | p95 latency < 2s · HTTP error rate < 5% · check pass rate > 95% |
+
+Pass/fail is determined by threshold outcomes. Check passes and fails map to `passed_tests` / `failed_tests`.
+
+---
+
+## Adding a new suite
+
+**1. Create your test files** under `examples/your-suite/`
+
+**2. Register the suite** in both registry files:
+
+```js
+// api/src/suites.js  — controls the dashboard dropdown and /api/suites
+'your-suite': {
+  id: 'your-suite',
+  name: 'Your Suite Name',
+  description: 'What it tests and where',
+  type: 'playwright',        // 'playwright' | 'newman' | 'k6'
+  estimatedDurationSecs: 30,
+}
+
+// runner/src/suites.js  — controls how the runner executes it
+'your-suite': {
+  type: 'playwright',
+  cwd: '/suites/your-suite',
+}
+```
+
+**3. Suite-specific setup:**
+
+- **Playwright** — include a `playwright.config.js` that reads `process.env.ARTIFACT_DIR` for reporter output paths. See [examples/playwright-demo/playwright.config.js](examples/playwright-demo/playwright.config.js).
+- **Newman** — include a `collection.json`. An `environment.json` in the same directory is loaded automatically if present.
+- **k6** — name your entry point `script.js` and export a `handleSummary` function that writes to `${__ENV.ARTIFACT_DIR}/summary.json`. See [examples/k6-demo/script.js](examples/k6-demo/script.js).
+
+No rebuild needed — `examples/` is bind-mounted as a live volume in Docker Compose.
+
+---
+
+## CI / CD integration
+
+The included GitHub Actions workflows exercise the full platform on every push:
+
+| Workflow | What it does |
+|---|---|
+| [ci.yml](.github/workflows/ci.yml) | Builds images, starts the full stack, runs all three example suites, asserts each passes. Also runs a parallel job on a real Kubernetes (kind) cluster. |
+| [release-gate.yml](.github/workflows/release-gate.yml) | Template for other projects — deploy your app, trigger a SmokeStack suite, block the release if tests fail. Requires `SMOKESTACK_URL` secret. |
+
+---
+
+## REST API reference
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/runs` | Trigger a new run |
+| `GET` | `/api/runs` | List runs (`?limit=50&offset=0&status=passed`) |
+| `GET` | `/api/runs/:id` | Get a single run with full results |
+| `GET` | `/api/runs/:id/logs` | Get raw log output for a run |
+| `GET` | `/api/suites` | List registered suites |
+| `GET` | `/api/health` | Health check |
 
 ---
 
@@ -42,6 +247,7 @@ flowchart TD
         WORKER[BullMQ Worker]
         PW[Playwright\nbrowser + API tests]
         NM[Newman\nPostman collections]
+        K6[k6\nperformance tests]
     end
 
     subgraph Storage
@@ -61,12 +267,12 @@ flowchart TD
     REDIS -->|dequeue job| WORKER
     WORKER -->|spawn| PW
     WORKER -->|spawn| NM
-    PW -->|write reports| VOL
-    NM -->|write reports| VOL
+    WORKER -->|spawn| K6
+    PW & NM & K6 -->|write reports| VOL
     WORKER -->|UPDATE run status + counts| PG
 ```
 
-The API never blocks on test execution. It creates a `queued` run record and returns immediately. The runner picks up the job asynchronously, executes the tests, then writes results and artifacts back.
+The API never blocks on test execution — it creates a `queued` record and returns immediately. The runner picks up the job, executes the tests, and writes results back asynchronously.
 
 ### Deployment targets
 
@@ -95,228 +301,19 @@ flowchart LR
 
 ---
 
-## Stack
-
-| Layer | Technology |
-|-------|-----------|
-| API | Node.js + Express |
-| Queue | Redis + BullMQ |
-| Database | PostgreSQL 16 |
-| Runner base image | `mcr.microsoft.com/playwright:v1.42.0-jammy` |
-| Browser testing | Playwright 1.42 |
-| API testing | Newman + newman-reporter-htmlextra |
-| Performance testing | k6 |
-| Dashboard | Vanilla HTML/CSS/JS (zero build step) |
-| Infrastructure | Docker + Docker Compose |
-| Orchestration | Kubernetes (manifests in `k8s/`) |
-
----
-
-## Running locally
-
-**Requirements:** Docker Desktop
-
-```bash
-# First run (builds images — takes 5–10 min for the Playwright base image)
-docker compose up --build
-
-# Subsequent runs
-docker compose up
-```
-
-Dashboard: **http://localhost:3000**
-
-To wipe all data and start fresh:
-```bash
-docker compose down -v
-```
-
----
-
-## Project structure
-
-```
-smokestack/
-├── api/                        # Express API + dashboard static files
-│   ├── src/
-│   │   ├── index.js            # App entry, routes, static middleware
-│   │   ├── db.js               # PostgreSQL pool
-│   │   ├── queue.js            # BullMQ producer
-│   │   ├── suites.js           # Suite registry (API side)
-│   │   └── routes/runs.js      # /api/runs endpoints
-│   └── public/                 # Dashboard (index.html, app.js, style.css)
-│
-├── runner/                     # BullMQ worker
-│   └── src/
-│       ├── worker.js           # Worker entry point
-│       ├── processor.js        # Job handler (mkdir → run → parse → persist)
-│       ├── executor.js         # Spawns playwright / newman processes
-│       ├── suites.js           # Suite registry (runner side)
-│       └── db.js               # PostgreSQL pool
-│
-├── examples/                   # Example test suites (mounted into runner)
-│   ├── playwright-demo/        # 5 UI tests + 6 API tests
-│   └── newman-demo/            # 7 API tests (Postman collection)
-│
-├── postgres/
-│   └── init.sql                # Creates the `runs` table
-│
-├── k8s/                        # Kubernetes manifests
-│   ├── namespace.yaml
-│   ├── configmap.yaml
-│   ├── postgres.yaml
-│   ├── redis.yaml
-│   ├── api.yaml
-│   ├── runner.yaml
-│   ├── storage.yaml
-│   └── ingress.yaml
-│
-└── docker-compose.yml
-```
-
----
-
-## API
-
-### Trigger a run
-
-```
-POST /api/runs
-Content-Type: application/json
-
-{
-  "suite": "playwright-demo",
-  "environment": "staging"
-}
-```
-
-Response:
-```json
-{
-  "id": "2bcaa19b-967b-4dd6-acca-fae640ac0367",
-  "suite": "playwright-demo",
-  "environment": "staging",
-  "status": "queued",
-  "created_at": "2026-03-13T06:00:00.000Z"
-}
-```
-
-### List runs
-
-```
-GET /api/runs?limit=50&offset=0&status=passed
-```
-
-### Get a run
-
-```
-GET /api/runs/:id
-```
-
-Response includes: `status`, `total_tests`, `passed_tests`, `failed_tests`, `duration_ms`, `artifact_path`, `error_message`
-
-### Get logs
-
-```
-GET /api/runs/:id/logs
-```
-
-### Available suites
-
-```
-GET /api/suites
-```
-
-### Artifacts
-
-Artifacts are served directly by the API:
-
-```
-GET /artifacts/:runId/html-report/index.html   # Playwright HTML report
-GET /artifacts/:runId/report.html              # Newman HTML report
-GET /artifacts/:runId/results.json             # JSON results
-GET /artifacts/:runId/run.log                  # Raw stdout/stderr
-```
-
----
-
-## Example suites
-
-### playwright-demo
-
-Playwright tests split across two files:
-
-- `tests/smoke.spec.js` — 5 UI tests on [playwright.dev](https://playwright.dev): homepage title, "Get started" CTA, navigation, sidebar, search
-- `tests/api.spec.js` — 6 API tests on [jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com): GET posts, GET single post, POST create, filter by userId, GET users, 404 handling
-
-### k6-demo
-
-k6 load test with staged ramp-up against [jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com):
-
-- **5 virtual users** ramped over 10s, held for 20s, then ramped down
-- **3 requests per iteration**: GET post, GET users list, POST create post
-- **8 checks** across all requests (status codes, response shape, latency)
-- **Thresholds**: p95 latency < 2s · HTTP error rate < 5% · check pass rate > 95%
-- SmokeStack maps k6 check passes/fails to `passed_tests`/`failed_tests`; threshold violations set run status to `failed`
-
-### newman-demo
-
-Newman collection with 7 requests across 3 folders against [jsonplaceholder.typicode.com](https://jsonplaceholder.typicode.com):
-
-- **Posts** — GET all, GET one, POST create, GET with filter
-- **Users** — GET all, GET one
-- **Todos** — GET incomplete
-
-Each request has inline test assertions for status codes, response shape, and response time.
-
----
-
-## Adding a new suite
-
-**1. Create the suite files** under `examples/your-suite/`
-
-**2. Register it in both `api/src/suites.js` and `runner/src/suites.js`:**
-
-```js
-// api/src/suites.js
-'your-suite': {
-  id: 'your-suite',
-  name: 'Your Suite',
-  description: 'What it tests',
-  type: 'playwright', // or 'newman'
-}
-
-// runner/src/suites.js
-'your-suite': {
-  type: 'playwright',
-  cwd: '/suites/your-suite',
-}
-```
-
-**3. For Playwright suites**, include a `playwright.config.js` that reads `process.env.ARTIFACT_DIR` for output paths (see `examples/playwright-demo/playwright.config.js`).
-
-**4. For Newman suites**, include a `collection.json` in the suite directory. An optional `environment.json` is loaded automatically if present.
-
-No rebuild needed for new suites — the `examples/` directory is mounted as a live volume.
-
----
-
 ## Kubernetes
 
-For local Kubernetes development using [kind](https://kind.sigs.k8s.io/):
+For local Kubernetes using [kind](https://kind.sigs.k8s.io/):
 
 ```bash
-# Create cluster
 kind create cluster --name smokestack
 
-# Load locally-built images
+docker build -t smokestack-api:latest ./api
+docker build -t smokestack-runner:latest -f runner/Dockerfile .
 kind load docker-image smokestack-api:latest --name smokestack
 kind load docker-image smokestack-runner:latest --name smokestack
 
-# Deploy
 kubectl apply -f k8s/
-
-# Check pods
 kubectl get pods -n smokestack
 
 # Expose dashboard
@@ -325,9 +322,72 @@ kubectl port-forward service/smokestack-api-svc 3000:80 -n smokestack
 
 ---
 
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| API | Node.js + Express |
+| Queue | Redis + BullMQ |
+| Database | PostgreSQL 16 |
+| Runner base image | `mcr.microsoft.com/playwright:v1.42.0-jammy` |
+| Browser testing | Playwright 1.42 |
+| API testing | Newman + newman-reporter-htmlextra |
+| Performance testing | k6 0.54 |
+| Dashboard | Vanilla HTML/CSS/JS (zero build step) |
+| Infrastructure | Docker + Docker Compose |
+| Orchestration | Kubernetes (manifests in `k8s/`) |
+
+---
+
+## Project structure
+
+```
+smokestack/
+├── api/                        # Express API + dashboard
+│   ├── src/
+│   │   ├── index.js            # App entry, routes, static middleware
+│   │   ├── routes/runs.js      # /api/runs endpoints
+│   │   ├── suites.js           # Suite registry (API side — dashboard dropdown)
+│   │   ├── queue.js            # BullMQ job producer
+│   │   └── db.js               # PostgreSQL pool
+│   └── public/                 # Dashboard SPA (index.html, app.js, style.css)
+│
+├── runner/                     # Test execution worker
+│   └── src/
+│       ├── worker.js           # BullMQ worker entry point
+│       ├── processor.js        # Job handler: setup → execute → parse → persist
+│       ├── executor.js         # Spawns playwright / newman / k6 processes
+│       ├── suites.js           # Suite registry (runner side — execution config)
+│       └── db.js               # PostgreSQL pool
+│
+├── examples/                   # Example test suites
+│   ├── playwright-demo/        # 11 tests: 5 UI + 6 API
+│   ├── newman-demo/            # 7 API tests (Postman collection)
+│   └── k6-demo/                # Load test: 5 VUs, 3 request types, 8 checks
+│
+├── .github/workflows/
+│   ├── ci.yml                  # Full stack CI — runs all suites + k8s job
+│   └── release-gate.yml        # Template: block release on test failure
+│
+├── k8s/                        # Kubernetes manifests
+│   ├── namespace.yaml
+│   ├── configmap.yaml
+│   ├── postgres.yaml           # StatefulSet + Service
+│   ├── redis.yaml              # Deployment + Service
+│   ├── api.yaml                # Deployment + ClusterIP Service
+│   ├── runner.yaml             # Deployment
+│   ├── storage.yaml            # PersistentVolumeClaim
+│   └── ingress.yaml            # Optional ingress
+│
+├── postgres/init.sql           # Schema: runs table
+└── docker-compose.yml
+```
+
+---
+
 ## Roadmap
 
-- [ ] Flaky test detection (flag tests that pass/fail inconsistently across runs)
+- [ ] Flaky test detection — flag tests that pass/fail inconsistently across runs
 - [ ] Historical pass rate charts per suite
 - [ ] Slack / webhook notifications on failure
 - [ ] Environment variable injection per run
