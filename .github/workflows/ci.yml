@@ -209,7 +209,52 @@ jobs:
             exit 1
           fi
 
-      # ── 18. Show all runs in DB ────────────────────────────────────────────
+      # ── 18. Trigger pactum-demo run ────────────────────────────────────────
+      - name: Trigger pactum-demo run
+        id: pactum_trigger
+        run: |
+          RESPONSE=$(curl -sf -X POST http://localhost:3000/api/runs \
+            -H "Content-Type: application/json" \
+            -d '{"suite":"pactum-demo","environment":"ci"}')
+          echo "$RESPONSE" | jq .
+          echo "run_id=$(echo "$RESPONSE" | jq -r .id)" >> "$GITHUB_OUTPUT"
+
+      # ── 19. Poll pactum run ────────────────────────────────────────────────
+      - name: Wait for pactum run to complete
+        id: pactum_poll
+        run: |
+          RUN_ID="${{ steps.pactum_trigger.outputs.run_id }}"
+          echo "Polling pactum run $RUN_ID..."
+
+          for i in $(seq 1 30); do
+            RUN=$(curl -sf "http://localhost:3000/api/runs/$RUN_ID")
+            STATUS=$(echo "$RUN" | jq -r .status)
+            echo "  [$i] status=$STATUS"
+
+            if [ "$STATUS" = "passed" ] || [ "$STATUS" = "failed" ] || [ "$STATUS" = "error" ]; then
+              echo "$RUN" | jq '{status, total_tests, passed_tests, failed_tests, duration_ms}'
+              echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+              break
+            fi
+            sleep 5
+          done
+
+      # ── 20. Print pactum logs on failure ───────────────────────────────────
+      - name: Print pactum logs (on failure)
+        if: steps.pactum_poll.outputs.status != 'passed'
+        run: |
+          RUN_ID="${{ steps.pactum_trigger.outputs.run_id }}"
+          curl -sf "http://localhost:3000/api/runs/$RUN_ID/logs" | jq -r .log_output
+
+      - name: Assert pactum run passed
+        run: |
+          STATUS="${{ steps.pactum_poll.outputs.status }}"
+          if [ "$STATUS" != "passed" ]; then
+            echo "::error ::pactum-demo run status was '$STATUS' — expected 'passed'"
+            exit 1
+          fi
+
+      # ── 22. Show all runs in DB ────────────────────────────────────────────
       - name: Show all runs
         if: always()
         run: |
@@ -354,17 +399,20 @@ jobs:
           NEWMAN_ID=$(trigger newman-demo)
           PW_ID=$(trigger playwright-demo)
           K6_ID=$(trigger k6-demo)
+          PACTUM_ID=$(trigger pactum-demo)
 
           echo "newman-demo:     $NEWMAN_ID"
           echo "playwright-demo: $PW_ID"
           echo "k6-demo:         $K6_ID"
+          echo "pactum-demo:     $PACTUM_ID"
 
-          echo "newman_id=$NEWMAN_ID"   >> "$GITHUB_OUTPUT"
-          echo "pw_id=$PW_ID"           >> "$GITHUB_OUTPUT"
-          echo "k6_id=$K6_ID"           >> "$GITHUB_OUTPUT"
+          echo "newman_id=$NEWMAN_ID"     >> "$GITHUB_OUTPUT"
+          echo "pw_id=$PW_ID"             >> "$GITHUB_OUTPUT"
+          echo "k6_id=$K6_ID"             >> "$GITHUB_OUTPUT"
+          echo "pactum_id=$PACTUM_ID"     >> "$GITHUB_OUTPUT"
 
       # ── 12. Watch KEDA scale up ───────────────────────────────────────────────
-      # KEDA detects the 3 queued jobs and scales the runner from 0 → 3 replicas.
+      # KEDA detects the 4 queued jobs and scales the runner from 0 → 4 replicas.
       - name: Watch KEDA scale up
         run: |
           echo "Waiting for KEDA to scale runner from 0..."
@@ -372,7 +420,7 @@ jobs:
             READY=$(kubectl get deployment smokestack-runner -n smokestack \
               -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
             echo "  [${i}] ready replicas: ${READY:-0}"
-            [ "${READY:-0}" -ge "3" ] && echo "Scaled to 3 runners!" && break
+            [ "${READY:-0}" -ge "4" ] && echo "Scaled to 4 runners!" && break
             sleep 5
           done
           echo ""
@@ -403,28 +451,31 @@ jobs:
             echo '{"status":"timeout"}' > "/tmp/ss_${NAME}"
           }
 
-          poll_run "${{ steps.trigger.outputs.newman_id }}" newman     &
-          poll_run "${{ steps.trigger.outputs.pw_id }}"     playwright &
-          poll_run "${{ steps.trigger.outputs.k6_id }}"     k6         &
+          poll_run "${{ steps.trigger.outputs.newman_id }}"  newman     &
+          poll_run "${{ steps.trigger.outputs.pw_id }}"      playwright &
+          poll_run "${{ steps.trigger.outputs.k6_id }}"      k6         &
+          poll_run "${{ steps.trigger.outputs.pactum_id }}"  pactum     &
           wait
 
           echo ""
           echo "=== Results ==="
-          for name in newman playwright k6; do
+          for name in newman playwright k6 pactum; do
             jq -c '{suite, status, passed_tests, failed_tests, duration_ms}' "/tmp/ss_${name}"
           done
 
-          NEWMAN_STATUS=$(jq -r .status /tmp/ss_newman)
-          PW_STATUS=$(jq    -r .status /tmp/ss_playwright)
-          K6_STATUS=$(jq    -r .status /tmp/ss_k6)
+          NEWMAN_STATUS=$(jq  -r .status /tmp/ss_newman)
+          PW_STATUS=$(jq      -r .status /tmp/ss_playwright)
+          K6_STATUS=$(jq      -r .status /tmp/ss_k6)
+          PACTUM_STATUS=$(jq  -r .status /tmp/ss_pactum)
 
-          echo "newman_status=$NEWMAN_STATUS" >> "$GITHUB_OUTPUT"
-          echo "pw_status=$PW_STATUS"         >> "$GITHUB_OUTPUT"
-          echo "k6_status=$K6_STATUS"         >> "$GITHUB_OUTPUT"
+          echo "newman_status=$NEWMAN_STATUS"   >> "$GITHUB_OUTPUT"
+          echo "pw_status=$PW_STATUS"           >> "$GITHUB_OUTPUT"
+          echo "k6_status=$K6_STATUS"           >> "$GITHUB_OUTPUT"
+          echo "pactum_status=$PACTUM_STATUS"   >> "$GITHUB_OUTPUT"
 
       # ── 14. Print logs for any failed suites ─────────────────────────────────
       - name: Print run logs (on failure)
-        if: steps.poll.outputs.newman_status != 'passed' || steps.poll.outputs.pw_status != 'passed' || steps.poll.outputs.k6_status != 'passed'
+        if: steps.poll.outputs.newman_status != 'passed' || steps.poll.outputs.pw_status != 'passed' || steps.poll.outputs.k6_status != 'passed' || steps.poll.outputs.pactum_status != 'passed'
         run: |
           print_logs() {
             local ID=$1 NAME=$2 STATUS=$3
@@ -433,18 +484,20 @@ jobs:
               curl -sf "http://localhost:3000/api/runs/$ID/logs" | jq -r .log_output
             fi
           }
-          print_logs "${{ steps.trigger.outputs.newman_id }}" newman     "${{ steps.poll.outputs.newman_status }}"
-          print_logs "${{ steps.trigger.outputs.pw_id }}"     playwright "${{ steps.poll.outputs.pw_status }}"
-          print_logs "${{ steps.trigger.outputs.k6_id }}"     k6         "${{ steps.poll.outputs.k6_status }}"
+          print_logs "${{ steps.trigger.outputs.newman_id }}"  newman     "${{ steps.poll.outputs.newman_status }}"
+          print_logs "${{ steps.trigger.outputs.pw_id }}"      playwright "${{ steps.poll.outputs.pw_status }}"
+          print_logs "${{ steps.trigger.outputs.k6_id }}"      k6         "${{ steps.poll.outputs.k6_status }}"
+          print_logs "${{ steps.trigger.outputs.pactum_id }}"  pactum     "${{ steps.poll.outputs.pactum_status }}"
 
       # ── 15. Assert all suites passed ─────────────────────────────────────────
       - name: Assert all suites passed
         run: |
           FAILED=0
-          [ "${{ steps.poll.outputs.newman_status }}"     != "passed" ] && echo "::error::newman-demo: ${{ steps.poll.outputs.newman_status }}"     && FAILED=1
-          [ "${{ steps.poll.outputs.pw_status }}"         != "passed" ] && echo "::error::playwright-demo: ${{ steps.poll.outputs.pw_status }}"     && FAILED=1
-          [ "${{ steps.poll.outputs.k6_status }}"         != "passed" ] && echo "::error::k6-demo: ${{ steps.poll.outputs.k6_status }}"             && FAILED=1
-          [ "$FAILED" = "0" ] && echo "All 3 suites passed on Kubernetes!" || exit 1
+          [ "${{ steps.poll.outputs.newman_status }}"    != "passed" ] && echo "::error::newman-demo: ${{ steps.poll.outputs.newman_status }}"    && FAILED=1
+          [ "${{ steps.poll.outputs.pw_status }}"        != "passed" ] && echo "::error::playwright-demo: ${{ steps.poll.outputs.pw_status }}"    && FAILED=1
+          [ "${{ steps.poll.outputs.k6_status }}"        != "passed" ] && echo "::error::k6-demo: ${{ steps.poll.outputs.k6_status }}"            && FAILED=1
+          [ "${{ steps.poll.outputs.pactum_status }}"    != "passed" ] && echo "::error::pactum-demo: ${{ steps.poll.outputs.pactum_status }}"    && FAILED=1
+          [ "$FAILED" = "0" ] && echo "All 4 suites passed on Kubernetes!" || exit 1
 
       # ── 16. Cluster diagnostics on failure ───────────────────────────────────
       - name: Cluster diagnostics (on failure)

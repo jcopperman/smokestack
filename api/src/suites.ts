@@ -16,7 +16,7 @@ const SUITES: Record<string, SuiteDefinition> = {
     type: 'newman',
     estimatedDurationSecs: 15,
     tags: ['smoke', 'api'],
-  },
+  }, 
   'k6-demo': {
     id: 'k6-demo',
     name: 'k6 Performance Demo',
@@ -24,6 +24,14 @@ const SUITES: Record<string, SuiteDefinition> = {
     type: 'k6',
     estimatedDurationSecs: 40,
     tags: ['performance', 'load'],
+  },
+  'pactum-demo': {
+    id: 'pactum-demo',
+    name: 'Pactum API Demo',
+    description: 'API smoke tests using Pactum + Jest against jsonplaceholder.typicode.com',
+    type: 'pactum',
+    estimatedDurationSecs: 15,
+    tags: ['smoke', 'api'],
   },
 };
 

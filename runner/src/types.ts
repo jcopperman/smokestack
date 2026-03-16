@@ -1,4 +1,4 @@
-export type SuiteType = 'playwright' | 'newman' | 'k6';
+export type SuiteType = 'playwright' | 'newman' | 'k6' | 'pactum';
 
 export interface RunnerSuiteConfig {
   type: SuiteType;

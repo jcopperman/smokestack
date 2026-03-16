@@ -1,0 +1,14 @@
+{
+  "name": "smokestack-pactum-demo",
+  "version": "1.0.0",
+  "description": "API smoke tests using Pactum — SmokeStack demo suite",
+  "scripts": {
+    "test": "jest"
+  },
+  "dependencies": {
+    "pactum": "^3.7.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}

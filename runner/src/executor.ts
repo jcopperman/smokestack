@@ -164,6 +164,32 @@ export async function runK6(
   return { exitCode, results };
 }
 
+/**
+ * Execute a Pactum API test suite via Jest.
+ * Returns { exitCode, results } where results = { total, passed, failed }.
+ */
+export async function runPactum(
+  suiteConfig: RunnerSuiteConfig,
+  artifactDir: string,
+  logPath: string,
+  extraEnv: Record<string, string> = {}
+): Promise<ExecutionResult> {
+  const resultsJson = path.join(artifactDir, 'results.json');
+
+  const { exitCode } = await runCommand(
+    'jest',
+    ['--json', `--outputFile=${resultsJson}`, '--forceExit'],
+    {
+      cwd: suiteConfig.cwd,
+      env: { ARTIFACT_DIR: artifactDir, ...extraEnv },
+      logPath,
+    }
+  );
+
+  const results = parsePactumResults(resultsJson);
+  return { exitCode, results };
+}
+
 function parsePlaywrightResults(jsonPath: string): TestResults | null {
   try {
     if (!fs.existsSync(jsonPath)) return null;
@@ -212,6 +238,24 @@ function parseK6Results(jsonPath: string): TestResults | null {
     return { total: passed + failed, passed, failed };
   } catch (e) {
     console.error('Failed to parse k6 results:', (e as Error).message);
+    return null;
+  }
+}
+
+function parsePactumResults(jsonPath: string): TestResults | null {
+  try {
+    if (!fs.existsSync(jsonPath)) return null;
+    const raw = JSON.parse(fs.readFileSync(jsonPath, 'utf8')) as {
+      numTotalTests?:  number;
+      numPassedTests?: number;
+      numFailedTests?: number;
+    };
+    const total  = raw.numTotalTests  ?? 0;
+    const passed = raw.numPassedTests ?? 0;
+    const failed = raw.numFailedTests ?? 0;
+    return { total, passed, failed };
+  } catch (e) {
+    console.error('Failed to parse Pactum results:', (e as Error).message);
     return null;
   }
 }

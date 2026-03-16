@@ -3,7 +3,7 @@ import path from 'path';
 import { Job } from 'bullmq';
 import pool from './db';
 import SUITES from './suites';
-import { runPlaywright, runNewman, runK6 } from './executor';
+import { runPlaywright, runNewman, runK6, runPactum } from './executor';
 import { sendNotification } from './notifier';
 import { JobData, RunUpdateFields } from './types';
 
@@ -50,6 +50,8 @@ export async function processJob(job: Job<JobData>): Promise<void> {
       ({ exitCode, results } = await runNewman(suiteConfig, artifactDir, logPath, env));
     } else if (suiteConfig.type === 'k6') {
       ({ exitCode, results } = await runK6(suiteConfig, artifactDir, logPath, env));
+    } else if (suiteConfig.type === 'pactum') {
+      ({ exitCode, results } = await runPactum(suiteConfig, artifactDir, logPath, env));
     } else {
       throw new Error(`Unknown suite type: ${suiteConfig.type}`);
     }

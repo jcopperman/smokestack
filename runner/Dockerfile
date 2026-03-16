@@ -14,8 +14,8 @@ ENV NODE_PATH=/usr/lib/node_modules
 
 # Install the Playwright CLI and test runner globally, pinned to match the base
 # image's browser version so PLAYWRIGHT_BROWSERS_PATH is honoured correctly.
-# Also install Newman and its HTML reporter.
-RUN npm install -g @playwright/test@1.42.0 newman newman-reporter-htmlextra
+# Also install Newman and its HTML reporter, and Jest + Pactum for API tests.
+RUN npm install -g @playwright/test@1.42.0 newman newman-reporter-htmlextra jest pactum
 
 # Install k6 for performance/load testing
 RUN curl -L https://github.com/grafana/k6/releases/download/v0.54.0/k6-v0.54.0-linux-amd64.tar.gz \

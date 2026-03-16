@@ -15,6 +15,10 @@ const SUITES: Record<string, RunnerSuiteConfig> = {
     type: 'k6',
     cwd: '/suites/k6-demo',
   },
+  'pactum-demo': {
+    type: 'pactum',
+    cwd: '/suites/pactum-demo',
+  },
 };
 
 export default SUITES;
